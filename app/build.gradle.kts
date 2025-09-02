@@ -60,7 +60,7 @@ dependencies {
 
 }
 dependencies {
-    // Jetpack Compose BOM
+    implementation(libs.androidx.foundation)// Jetpack Compose BOM
     implementation(platform("androidx.compose:compose-bom:2024.04.01"))
 
     // Core Compose
@@ -77,4 +77,8 @@ dependencies {
     // Debug tools
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+
+    implementation("androidx.compose.ui:ui:1.5.0")
+    implementation("androidx.compose.material3:material3:1.2.0")
 }
