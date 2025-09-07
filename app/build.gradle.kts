@@ -40,45 +40,36 @@ android {
 }
 
 dependencies {
+    // Jetpack Compose text library (brings KeyboardOptions, KeyboardType, ImeAction, etc.)
+    implementation("androidx.compose.ui:ui-text:1.7.0")
 
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation(libs.androidx.activity.compose)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
-    implementation("com.google.code.gson:gson:2.10.1")
-
-}
-dependencies {
-    implementation(libs.androidx.foundation)// Jetpack Compose BOM
-    implementation(platform("androidx.compose:compose-bom:2024.04.01"))
+    // Compose BOM (let Studio suggest a recent stable if this one changes)
+    implementation(platform("androidx.compose:compose-bom:2024.09.01"))
 
     // Core Compose
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.ui:ui-text")          // <-- This brings KeyboardOptions
+    implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 
-    // Navigation for Compose
-    implementation("androidx.navigation:navigation-compose:2.7.7")
+    // Navigation + Activity
+    implementation("androidx.navigation:navigation-compose:2.8.0")
+    implementation("androidx.activity:activity-compose:1.9.2")
 
-    // Activity Compose
-    implementation("androidx.activity:activity-compose:1.9.0")
+    // AndroidX core/lifecycle
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
 
-    // Debug tools
+    // Gson
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    // Tests / debug
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.01"))
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
-
-
-    implementation("androidx.compose.ui:ui:1.5.0")
-    implementation("androidx.compose.material3:material3:1.2.0")
 }

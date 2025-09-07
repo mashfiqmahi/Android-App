@@ -13,7 +13,13 @@ import com.example.androidbloodbank.data.LocalRepo
 import com.example.androidbloodbank.data.model.Donor
 
 @Composable
-fun DashboardScreen(repo: LocalRepo, onRequest: () -> Unit, onSchedules: () -> Unit, onEmergency: () -> Unit) {
+fun DashboardScreen(
+    repo: LocalRepo,
+    onRequest: () -> Unit,
+    onSchedules: () -> Unit,
+    onEmergency: () -> Unit,
+    onProfile: () -> Unit
+) {
     val donors = remember { mutableStateListOf<Donor>().apply { addAll(repo.loadDonors()) } }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -28,6 +34,10 @@ fun DashboardScreen(repo: LocalRepo, onRequest: () -> Unit, onSchedules: () -> U
         Button(colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB00020)), onClick = onEmergency, modifier = Modifier.fillMaxWidth()) {
             Text("Emergency Mode (SOS)", color = Color.White)
         }
+        Button(onClick = onProfile, modifier = Modifier.fillMaxWidth()) {
+            Text("View Profile")
+        }
+
         Spacer(Modifier.height(16.dp))
 
         Text("Nearby Donors (seeded/offline):", fontWeight = FontWeight.SemiBold)

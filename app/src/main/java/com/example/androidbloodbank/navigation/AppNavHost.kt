@@ -41,13 +41,12 @@ fun AppNavHost(navController: NavHostController, repo: LocalRepo, onAlert: (Stri
 
 
             composable("profile") {
-                val dummyUser = UserProfile("Rahim", "O+", null, 5, "017XXXXXXXX", "Dhaka")
                 ProfileScreen(
-                    user = dummyUser,
-                    onUpdate = { updated -> println("Updated: $updated") },
+                    repo = repo,
                     onBack = { navController.popBackStack() }
                 )
             }
+
 
             composable(Routes.LOGIN) {
                 LoginScreen(
@@ -68,7 +67,8 @@ fun AppNavHost(navController: NavHostController, repo: LocalRepo, onAlert: (Stri
                     repo = repo,
                     onRequest = { navController.navigate(Routes.REQUEST) },
                     onSchedules = { navController.navigate(Routes.SCHEDULES) },
-                    onEmergency = { navController.navigate(Routes.EMERGENCY) }
+                    onEmergency = { navController.navigate(Routes.EMERGENCY) },
+                    onProfile = { navController.navigate("profile") }
                 )
             }
             composable(Routes.REQUEST) {
