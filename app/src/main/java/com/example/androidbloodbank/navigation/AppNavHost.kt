@@ -1,6 +1,5 @@
 package com.example.androidbloodbank.navigation
 
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -8,97 +7,174 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.androidbloodbank.data.LocalRepo
-import com.example.androidbloodbank.ui.screens.*
-import com.example.androidbloodbank.data.model.UserProfile
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import com.example.androidbloodbank.ui.components.BottomNavBar
-import com.example.androidbloodbank.ui.components.NavBarItem
+
+// Screens
+import com.example.androidbloodbank.ui.screens.HomeScreen
+import com.example.androidbloodbank.ui.screens.ProfileScreen
+import com.example.androidbloodbank.ui.screens.RequestBloodScreen
 import com.example.androidbloodbank.ui.LoginScreen
 import com.example.androidbloodbank.ui.SignupScreen
-import com.example.androidbloodbank.ui.EmergencyScreen
 import com.example.androidbloodbank.ui.SchedulesScreen
+import com.example.androidbloodbank.ui.EmergencyScreen
+import com.example.androidbloodbank.ui.flow.*
+
+import com.example.androidbloodbank.navigation.BottomNavBar
+
 @Composable
-fun AppNavHost(navController: NavHostController, repo: LocalRepo, onAlert: (String) -> Unit = {}) {
+fun AppNavHost(
+    navController: NavHostController,
+    repo: LocalRepo,
+    onAlert: (String) -> Unit = {}
+) {
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // bottom nav items
-    val bottomItems = listOf(
-        NavBarItem(Routes.HOME, "Home", Icons.Default.Home),
-        NavBarItem(Routes.REQUEST, "Request", Icons.Default.Search),
-        NavBarItem(Routes.DASHBOARD, "Dashboard", Icons.Default.Dashboard),
-        NavBarItem("chat", "Chat", Icons.Default.Chat),
-        NavBarItem("profile", "Profile", Icons.Default.Person)
-    )
+    val backStack by navController.currentBackStackEntryAsState()
+    val route = backStack?.destination?.route
+    val showBottomBar = when {
+        route == null -> false
+        route.startsWith(Route.Splash.path) -> false
+        route.startsWith(Route.Gate.path)   -> false
+        route.startsWith(Route.SignIn.path) -> false
+        route.startsWith(Route.SignUp.path) -> false
+        else -> true
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        bottomBar = {
-            // Show bottomNav only on main routes (not login/signup)
-            val backStackEntry by navController.currentBackStackEntryAsState()
-            val current = backStackEntry?.destination?.route
-            val showBottom = current in listOf(Routes.HOME, Routes.REQUEST, Routes.DASHBOARD, "chat", "profile")
-            if (showBottom) BottomNavBar(navController = navController, items = bottomItems)
-        }
+        bottomBar = { if (showBottomBar) BottomNavBar(navController) }
     ) { padding ->
-        NavHost(navController = navController, startDestination = Routes.HOME, modifier = Modifier.padding(padding)) {
-            composable(Routes.HOME) {
-                HomeScreen(
-                    onLogin = { navController.navigate(Routes.LOGIN) },
-                    onSignUp = { navController.navigate(Routes.SIGNUP) },
-                    onEmergency = { navController.navigate(Routes.EMERGENCY) },
-                   // onViewDashboard = { navController.navigate(Routes.DASHBOARD) }
+
+        NavHost(
+            navController = navController,
+            startDestination = Route.Splash.path,
+            modifier = Modifier.padding(padding)
+        ) {
+            // Splash -> Gate
+            composable(Route.Splash.path) {
+                SplashScreen(
+                    onDone = {
+                        navController.navigate(Route.Gate.path) {
+                            popUpTo(Route.Splash.path) { inclusive = true }
+                        }
+                    }
                 )
             }
 
-            // request route reused for bottom nav
-            composable(Routes.REQUEST) {
-                var snackbarMessage by remember { mutableStateOf<String?>(null) }
-                snackbarMessage?.let { msg ->
+            // Gate: ONLY Login, Sign up, Emergency SOS
+            composable(Route.Gate.path) {
+                AccountGateScreen(
+                    onLogin = { navController.navigate(Route.SignIn.path) },
+                    onSignUp = { navController.navigate(Route.SignUp.path) },
+                    onEmergency = { navController.navigate(Route.EmergencySOS.path) }
+                )
+            }
+
+            // Emergency SOS (offline)
+            composable(Route.EmergencySOS.path) {
+                EmergencySosScreen(repo = repo, onBack = { navController.popBackStack() })
+            }
+
+            // Auth
+            composable(Route.SignIn.path) {
+                LoginScreen(
+                    repo = repo,
+                    onBack = { navController.popBackStack() },
+                    onLoginSuccess = { navController.navigate(Route.Home.path) }
+                )
+            }
+            composable(Route.SignUp.path) {
+                SignupScreen(
+                    repo = repo,
+                    onBack = { navController.popBackStack() },
+                    onSignupSuccess = { navController.navigate(Route.Home.path) }
+                )
+            }
+
+            // Home hub (unchanged)
+            composable(Route.Home.path) {
+                HomeScreen(
+                    onDonate       = { navController.navigate(Route.Donate.path) },
+                    onFindDonors   = { navController.navigate(Route.FindDonors.path) },
+                    onBloodBank    = { navController.navigate(Route.BloodBank.path) },
+                    onRequestBlood = { navController.navigate(Route.RequestBlood.path) },
+                    onProfile      = { navController.navigate(Route.Profile.path) }
+                )
+            }
+
+            // Donate flow
+            composable(Route.Donate.path) {
+                DonateScreen(
+                    onViewRequests = { navController.navigate(Route.ViewRequests.path) },
+                    onPostRequest  = { navController.navigate(Route.PostRequest.path) },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Route.ViewRequests.path) { ViewRequestsScreen(repo = repo, onBack = { navController.popBackStack() }) }
+            composable(Route.PostRequest.path)  { PostRequestScreen(repo = repo, onPosted = { navController.popBackStack() }, onBack = { navController.popBackStack() }) }
+
+            // Find donors flow
+            composable(Route.FindDonors.path) {
+                FindDonorsScreen(
+                    repo = repo,
+                    onSelectBG = { navController.navigate(Route.SelectBloodGroup.path) },
+                    onOpenDonor = { id -> navController.navigate(Route.DonorProfile.create(id)) },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Route.SelectBloodGroup.path) { SelectBloodGroupScreen(onDone = { navController.popBackStack() }, onBack = { navController.popBackStack() }) }
+            composable(Route.DonorProfile.path) { backStackEntry ->
+                val donorId = backStackEntry.arguments?.getString(Route.DonorProfile.ArgKey) ?: return@composable
+                DonorProfileScreen(donorId = donorId, repo = repo, onBack = { navController.popBackStack() })
+            }
+
+            // Blood bank flow
+            composable(Route.BloodBank.path) {
+                BloodBankScreen(
+                    onNearby    = { navController.navigate(Route.NearbyBloodBank.path) },
+                    onAvailable = { navController.navigate(Route.AvailableBlood.path) },
+                    onBack      = { navController.popBackStack() }
+                )
+            }
+            composable(Route.NearbyBloodBank.path) { NearbyBloodBankScreen(onBack = { navController.popBackStack() }) }
+            composable(Route.AvailableBlood.path) { AvailableBloodScreen(onBack = { navController.popBackStack() }) }
+
+            // Request blood
+            composable(Route.RequestBlood.path) {
+                var snack by remember { mutableStateOf<String?>(null) }
+                snack?.let { msg ->
                     LaunchedEffect(msg) {
-                        snackbarHostState.showSnackbar(msg, duration = SnackbarDuration.Short)
-                        snackbarMessage = null
+                        snackbarHostState.showSnackbar(message = msg, withDismissAction = true)
+                        snack = null
                     }
                 }
-                RequestBloodScreen(repo = repo, onBack = { navController.popBackStack() }, onAlert = { m -> snackbarMessage = m })
-            }
-
-            composable("profile") {
-                // example dummy user; later you can read actual profile from repo
-                val dummyUser = UserProfile("Rahim", "O+", null, 5, "017XXXXXXXX", "Dhaka")
-                // use the profile variant that accepts a user and callback (create it next)
-                ProfileScreen(user = dummyUser, onUpdate = { /* persist via repo */ }, onBack = { navController.popBackStack() })
-            }
-
-            composable(Routes.DASHBOARD) {
-                DashboardScreen(
+                RequestBloodScreen(
                     repo = repo,
-                    onRequest = { navController.navigate(Routes.REQUEST) },
-                    onSchedules = { navController.navigate(Routes.SCHEDULES) },
-                    onEmergency = { navController.navigate(Routes.EMERGENCY) },
-                    onProfile = { navController.navigate("profile") }
+                    onBack = { navController.popBackStack() },
+                    onAlert = { msg -> snack = msg }
+                )
+            }
+            composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { navController.popBackStack() }) }
+
+            // Profile (editable)
+            composable(Route.Profile.path) {
+                ProfileScreen(
+                    repo = repo,
+                    onBack = { navController.popBackStack() },
+                    onLoggedOut = {
+                        // Navigate to Gate screen after logout
+                        navController.navigate(Route.Gate.path) {
+                            popUpTo(Route.Home.path) { inclusive = true }
+                        }
+                    }
                 )
             }
 
-            composable(Routes.LOGIN) {
-                LoginScreen(repo = repo, onBack = { navController.popBackStack() }, onLoginSuccess = { navController.navigate(Routes.DASHBOARD) })
-            }
-            composable(Routes.SIGNUP) {
-                SignupScreen(repo = repo, onBack = { navController.popBackStack() }, onSignupSuccess = { navController.navigate(Routes.DASHBOARD) })
-            }
-            composable(Routes.SCHEDULES) {
-                SchedulesScreen(repo = repo, onBack = { navController.popBackStack() })
-            }
-            composable(Routes.EMERGENCY) {
-                EmergencyScreen(repo = repo, onBack = { navController.popBackStack() })
-            }
 
-            // simple placeholder for chat
-            composable("chat") {
-                ChatScreen(onBack = { navController.popBackStack() })
-            }
+            // Optional legacy entries
+            composable("schedules") { SchedulesScreen(repo = repo, onBack = { navController.popBackStack() }) }
+            composable("emergency") { EmergencyScreen(repo = repo, onBack = { navController.popBackStack() }) }
         }
     }
 }

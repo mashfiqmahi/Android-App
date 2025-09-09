@@ -76,4 +76,7 @@ dependencies {
     // if you use compose BOM you can omit version; otherwise set a matching Compose version
     implementation("androidx.compose.material:material-icons-extended:1.5.0")
 
+    implementation("androidx.compose.material:material-icons-extended")
+
+    implementation("androidx.compose.material:material-icons-extended")
 }
