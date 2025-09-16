@@ -1,8 +1,10 @@
 package com.example.androidbloodbank.navigation
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -20,7 +22,10 @@ import com.example.androidbloodbank.ui.SchedulesScreen
 import com.example.androidbloodbank.ui.EmergencyScreen
 import com.example.androidbloodbank.ui.flow.*
 
-import com.example.androidbloodbank.navigation.BottomNavBar
+// Bottom bar
+
+// Firebase
+import com.google.firebase.auth.FirebaseAuth
 
 @Composable
 fun AppNavHost(
@@ -30,6 +35,7 @@ fun AppNavHost(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // show bottom bar on main app sections only
     val backStack by navController.currentBackStackEntryAsState()
     val route = backStack?.destination?.route
     val showBottomBar = when {
@@ -51,19 +57,34 @@ fun AppNavHost(
             startDestination = Route.Splash.path,
             modifier = Modifier.padding(padding)
         ) {
-            // Splash -> Gate
+            // Splash — decide start based on Firebase or local session
             composable(Route.Splash.path) {
-                SplashScreen(
-                    onDone = {
-                        navController.navigate(Route.Gate.path) {
-                            popUpTo(Route.Splash.path) { inclusive = true }
-                        }
+                val auth = remember { FirebaseAuth.getInstance() }
+                val hasLocal = remember { repo.loadCurrentUserJson() != null }
+                LaunchedEffect(Unit) {
+                    val dest = if (auth.currentUser != null || hasLocal) Route.Home.path else Route.Gate.path
+                    navController.navigate(dest) {
+                        popUpTo(Route.Splash.path) { inclusive = true }
+                        launchSingleTop = true
                     }
-                )
+                }
+                Box(Modifier, contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
             }
 
             // Gate: ONLY Login, Sign up, Emergency SOS
             composable(Route.Gate.path) {
+                val auth = remember { FirebaseAuth.getInstance() }
+                // If already logged in, bounce to Home
+                LaunchedEffect(auth.currentUser, repo.loadCurrentUserJson()) {
+                    if (auth.currentUser != null || repo.loadCurrentUserJson() != null) {
+                        navController.navigate(Route.Home.path) {
+                            popUpTo(Route.Gate.path) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
                 AccountGateScreen(
                     onLogin = { navController.navigate(Route.SignIn.path) },
                     onSignUp = { navController.navigate(Route.SignUp.path) },
@@ -81,18 +102,29 @@ fun AppNavHost(
                 LoginScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() },
-                    onLoginSuccess = { navController.navigate(Route.Home.path) }
+                    onLoginSuccess = {
+                        navController.navigate(Route.Home.path) {
+                            popUpTo(Route.Gate.path) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
                 )
+
             }
             composable(Route.SignUp.path) {
                 SignupScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() },
-                    onSignupSuccess = { navController.navigate(Route.Home.path) }
+                    onSignupSuccess = {
+                        navController.navigate(Route.Home.path) {
+                            popUpTo(Route.Gate.path) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
 
-            // Home hub (unchanged)
+            // HOME
             composable(Route.Home.path) {
                 HomeScreen(
                     onDonate       = { navController.navigate(Route.Donate.path) },
@@ -157,20 +189,22 @@ fun AppNavHost(
             }
             composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { navController.popBackStack() }) }
 
-            // Profile (editable)
+            // Profile (with proper sign-out)
             composable(Route.Profile.path) {
                 ProfileScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() },
                     onLoggedOut = {
-                        // Navigate to Gate screen after logout
+                        // Ensure both sessions are cleared
+                        runCatching { FirebaseAuth.getInstance().signOut() }
+                        repo.logoutCurrentUser()
                         navController.navigate(Route.Gate.path) {
                             popUpTo(Route.Home.path) { inclusive = true }
+                            launchSingleTop = true
                         }
                     }
                 )
             }
-
 
             // Optional legacy entries
             composable("schedules") { SchedulesScreen(repo = repo, onBack = { navController.popBackStack() }) }

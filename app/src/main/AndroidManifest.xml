@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Required for Firebase (Auth, Database, etc.) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Helpful for checking connectivity (optional but recommended) -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- If you will read SMS yourself for phone auth (usually NOT needed):
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    -->
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -10,7 +19,14 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AndroidBloodBank">
+        android:theme="@style/Theme.AndroidBloodBank"
+        tools:targetApi="31">
+
+        <!-- If you ever call non-HTTPS endpoints during development,
+             uncomment this (NOT required for Firebase which is HTTPS):
+        android:usesCleartextTraffic="true"
+        -->
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -18,7 +34,6 @@
             android:theme="@style/Theme.AndroidBloodBank">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>

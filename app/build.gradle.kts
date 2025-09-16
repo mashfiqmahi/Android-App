@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -79,4 +80,20 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     implementation("androidx.compose.material:material-icons-extended")
+
+    //FireBase
+    implementation(platform("com.google.firebase:firebase-bom:34.2.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-auth:21.0.3")
+// For authentication
+    implementation("com.google.firebase:firebase-database:20.0.5")
+// For Realtime Database
+    implementation("com.google.firebase:firebase-analytics:21.0.0")
+// Optional for analytics
+
+    // Firebase Authentication (with Kotlin support)
+    implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
+    implementation("com.google.firebase:firebase-database-ktx:21.0.0") // optional
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
 }
