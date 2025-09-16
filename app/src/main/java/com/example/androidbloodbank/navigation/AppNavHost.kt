@@ -183,8 +183,7 @@ fun AppNavHost(
                 }
                 RequestBloodScreen(
                     repo = repo,
-                    onBack = { navController.popBackStack() },
-                    onAlert = { msg -> snack = msg }
+                    onBack = { navController.popBackStack() }
                 )
             }
             composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { navController.popBackStack() }) }

@@ -1,3 +1,5 @@
+import org.gradle.kotlin.dsl.implementation
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -96,4 +98,6 @@ dependencies {
     implementation("com.google.firebase:firebase-database-ktx:21.0.0") // optional
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
+    // Photo
+    implementation("io.coil-kt:coil-compose:2.6.0")
 }
