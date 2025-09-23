@@ -1,16 +1,25 @@
 package com.example.androidbloodbank.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
@@ -31,91 +40,320 @@ fun RequestBloodScreen(
     val scope = rememberCoroutineScope()
 
     var showingForm by rememberSaveable { mutableStateOf(false) }
+    var editingIndex by remember { mutableStateOf<Int?>(null) } // null = add, else edit that index
 
-    // Live list of requests (sorted newest first)
-    var requests by remember {
+    // Live list (sanitize + sort later)
+    var requests by remember { mutableStateOf(repo.loadRequests()) }
+
+    // ---- Search / Filter ----
+    var query by rememberSaveable { mutableStateOf("") }
+    var filterGroup by rememberSaveable { mutableStateOf<BloodGroup?>(null) }
+
+    // ---- Derived, filtered & sorted list ----
+    val displayList by remember(requests, query, filterGroup) {
         mutableStateOf(
-            repo.loadRequests().sortedByDescending { readLong(it, "timestamp", "time") ?: 0L }
+            requests
+                .filter { r ->
+                    (filterGroup == null || r.bloodGroup == filterGroup) &&
+                            (query.isBlank() || r.matchesQuery(query))
+                }
+                .sortedWith(compareByDescending<BloodRequest> { urgencyRank(it.neededOnMillis) }
+                    .thenBy { it.neededOnMillis })
         )
     }
 
-    // ---------- LIST ----------
-    if (!showingForm) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = { Text("Blood requests") },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
-                )
+    // ---- Show form if adding or editing ----
+    if (showingForm) {
+        val initial: BloodRequest? = editingIndex?.let { idx ->
+            requests.getOrNull(idx)
+        }
+        RequestBloodFormScreen(
+            initial = initial,
+            onBack = {
+                showingForm = false
+                editingIndex = null
             },
-            snackbarHost = { SnackbarHost(snackbar) },
-            floatingActionButton = {
-                ExtendedFloatingActionButton(
-                    onClick = { showingForm = true },
-                    icon = { Icon(Icons.Outlined.Bloodtype, null) },
-                    text = { Text("Request Blood") }
-                )
+            onSubmit = { name, group, hospital, location, contact, needMillis ->
+                scope.launch {
+                    val newObj = buildRequestObject(name, group, hospital, location, contact, needMillis)
+                    val updated = requests.toMutableList()
+                    if (editingIndex == null) {
+                        updated.add(0, newObj)
+                        snackbar.showSnackbar("Request posted")
+                    } else {
+                        val idx = editingIndex!!
+                        if (idx in updated.indices) updated[idx] = newObj
+                        snackbar.showSnackbar("Request updated")
+                    }
+                    repo.saveRequests(updated)
+                    requests = repo.loadRequests() // reload to be safe
+                    showingForm = false
+                    editingIndex = null
+                }
             }
-        ) { padding ->
-            if (requests.isEmpty()) {
-                Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                    Text("No requests yet. Tap “Request Blood” to post one.")
+        )
+        return
+    }
+
+    // ---------- LIST ----------
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Blood requests") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = { showingForm = true; editingIndex = null },
+                icon = { Icon(Icons.Outlined.Bloodtype, null) },
+                text = { Text("Request Blood") }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // --- Search & Filter row ---
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                label = { Text("Search name / hospital / location") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BloodGroupFilterDropdown(
+                    selected = filterGroup,
+                    onSelected = { filterGroup = it },
+                    modifier = Modifier.weight(1f)
+                )
+                if (filterGroup != null || query.isNotBlank()) {
+                    TextButton(onClick = { filterGroup = null; query = "" }) {
+                        Icon(Icons.Outlined.Clear, null); Spacer(Modifier.width(6.dp)); Text("Clear")
+                    }
+                }
+            }
+
+            if (displayList.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No matching requests.")
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 100.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    itemsIndexed(requests) { index, req ->
-                        RequestItem(
+                    itemsIndexed(displayList, key = { _, r -> r.stableKey() }) { _, req ->
+                        // Map back to source index for edit/delete
+                        val sourceIndex = requests.indexOf(req)
+                        RequestRow(
                             req = req,
-                            key = readString(req, "id") ?: readString(req, "requestId")
-                            ?: "${readLong(req, "timestamp", "time") ?: 0L}-$index"
+                            onEdit = {
+                                if (sourceIndex >= 0) {
+                                    editingIndex = sourceIndex
+                                    showingForm = true
+                                }
+                            },
+                            onDelete = {
+                                if (sourceIndex >= 0) {
+                                    val updated = requests.toMutableList()
+                                    updated.removeAt(sourceIndex)
+                                    repo.saveRequests(updated)
+                                    requests = repo.loadRequests()
+                                    scope.launch { snackbar.showSnackbar("Request deleted") }
+                                }
+                            }
                         )
                     }
                 }
             }
         }
-        return
     }
-
-    // ---------- FORM (full screen) ----------
-    RequestBloodFormScreen(
-        onBack = { showingForm = false },
-        onSubmit = { name, group, hospital, location, contact, needMillis ->
-            // 1) Save
-            scope.launch {
-                val created = buildRequestObject(name, group, hospital, location, contact, needMillis)
-                val updated = repo.loadRequests().toMutableList().apply { add(0, created) }
-                repo.saveRequests(updated)
-                requests = updated.sortedByDescending { readLong(it, "timestamp", "time") ?: 0L }
-                snackbar.showSnackbar("Request posted")
-            }
-            // 2) Close the form immediately (return to list)
-            showingForm = false
-        }
-    )
 }
 
-/* ------------------ Form with DATE and immediate close ------------------ */
+/* ------------------ Swipe row wrapper ------------------ */
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RequestRow(
+    req: BloodRequest,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> { // swipe right = Edit
+                    onEdit()
+                    false // don't keep dismissed
+                }
+                SwipeToDismissBoxValue.EndToStart -> {  // swipe left = Delete
+                    onDelete()
+                    false // we remove from list manually
+                }
+                else -> false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = state,
+        enableDismissFromStartToEnd = true,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            // Fill the whole row behind the card
+            val target = state.targetValue
+            val color = when (target) {
+                SwipeToDismissBoxValue.StartToEnd -> MaterialTheme.colorScheme.tertiaryContainer
+                SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.errorContainer
+                else -> MaterialTheme.colorScheme.surfaceVariant
+            }
+            val icon = when (target) {
+                SwipeToDismissBoxValue.StartToEnd -> Icons.Outlined.Edit
+                SwipeToDismissBoxValue.EndToStart -> Icons.Outlined.Delete
+                else -> null
+            }
+            val align = when (target) {
+                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                else -> Alignment.Center
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(color)
+                    .padding(horizontal = 24.dp),
+                contentAlignment = align
+            ) {
+                icon?.let { Icon(it, contentDescription = null) }
+            }
+        }
+
+    ) {
+        RequestItem(req = req)
+    }
+}
+
+/* ------------------ List item with urgent badge ------------------ */
+
+@Composable
+private fun RequestItem(req: BloodRequest) {
+    val context = LocalContext.current
+
+    val safeMillis = if (req.neededOnMillis > 0L) req.neededOnMillis else System.currentTimeMillis()
+    val dateStr = remember(safeMillis) {
+        SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(safeMillis))
+    }
+    val urgent = remember(safeMillis) { urgencyLabel(safeMillis) }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Box(Modifier.padding(14.dp)) {
+            // Right-side blood group chip (unchanged)
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                shape = RoundedCornerShape(12.dp),
+                tonalElevation = 0.dp,
+                modifier = Modifier.align(Alignment.TopEnd)
+            ) {
+                Text(
+                    text = req.bloodGroup.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Person, null); Spacer(Modifier.width(8.dp))
+                    Text(req.requesterName, style = MaterialTheme.typography.titleMedium)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.LocalHospital, null); Spacer(Modifier.width(8.dp))
+                    Text(req.hospitalName)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.LocationOn, null); Spacer(Modifier.width(8.dp))
+                    Text(req.locationName)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.DateRange, null); Spacer(Modifier.width(8.dp))
+                    Text(dateStr)
+                    Spacer(Modifier.width(8.dp))
+                    if (urgent != null) {
+                        AssistChip(
+                            onClick = {},
+                            label = { Text(urgent) },
+                            leadingIcon = {
+                                Icon(
+                                    if (urgent == "Today") Icons.Outlined.PriorityHigh else Icons.Outlined.Schedule,
+                                    contentDescription = null
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = if (urgent == "Today")
+                                    MaterialTheme.colorScheme.errorContainer
+                                else
+                                    MaterialTheme.colorScheme.tertiaryContainer
+                            )
+                        )
+                    }
+                }
+
+                // Call button instead of phone text
+                FilledTonalButton(
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${req.phone}"))
+                        context.startActivity(intent)
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Outlined.Call, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Call")
+                }
+            }
+        }
+    }
+}
+
+/* ------------------ FORM (add & edit) ------------------ */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RequestBloodFormScreen(
+    initial: BloodRequest? = null,
     onBack: () -> Unit,
     onSubmit: (name: String, group: BloodGroup, hospital: String, location: String, contact: String, needMillis: Long?) -> Unit
 ) {
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var name by remember { mutableStateOf("") }
-    var group by remember { mutableStateOf<BloodGroup?>(null) }
-    var hospital by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var contact by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initial?.requesterName ?: "") }
+    var group by remember { mutableStateOf<BloodGroup?>(initial?.bloodGroup) }
+    var hospital by remember { mutableStateOf(initial?.hospitalName ?: "") }
+    var location by remember { mutableStateOf(initial?.locationName ?: "") }
+    var contact by remember { mutableStateOf(initial?.phone ?: "") }
 
-    var needDateMillis by remember { mutableStateOf<Long?>(System.currentTimeMillis()) }
+    var needDateMillis by remember { mutableStateOf<Long?>(initial?.neededOnMillis ?: System.currentTimeMillis()) }
     var showDatePicker by remember { mutableStateOf(false) }
 
     if (showDatePicker) {
@@ -132,7 +370,7 @@ private fun RequestBloodFormScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Request Blood") },
+                title = { Text(if (initial == null) "Request Blood" else "Edit Request") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.Close, null) } }
             )
         },
@@ -164,51 +402,17 @@ private fun RequestBloodFormScreen(
                     if (name.isBlank() || group == null || contact.isBlank()) {
                         scope.launch { snackbar.showSnackbar("Please fill name, blood group and contact") }
                     } else {
-                        // Call parent submit AND close the form via onBack(), guaranteed return to list
                         onSubmit(name.trim(), group!!, hospital.trim(), location.trim(), contact.trim(), needDateMillis)
                         onBack()
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(52.dp)
-            ) { Text("Submit request") }
+            ) { Text(if (initial == null) "Submit request" else "Save changes") }
         }
     }
 }
 
-/* ------------------ List item ------------------ */
-
-@Composable
-private fun RequestItem(req: BloodRequest, key: String) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.elevatedCardColors()) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Person, null); Spacer(Modifier.width(8.dp))
-                val who = readString(req, "name", "requesterName") ?: "—"
-                Text(who, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.weight(1f))
-                val bg = readString(req, "bloodGroup", "group") ?: "—"
-                AssistChip(onClick = {}, label = { Text(bg) })
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.LocalHospital, null); Spacer(Modifier.width(8.dp)); Text(readString(req, "hospital") ?: "—") }
-            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.LocationOn, null); Spacer(Modifier.width(8.dp)); Text(readString(req, "location", "address") ?: "—") }
-            Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Outlined.Phone, null); Spacer(Modifier.width(8.dp)); Text(readString(req, "contact", "contactNumber", "phone") ?: "—") }
-            val need = readLong(req, "neededDateMillis", "needDate", "dateNeeded", "requiredOn")
-            if (need != null && need > 0) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.DateRange, null); Spacer(Modifier.width(8.dp))
-                    Text("Needed: ${formatDate(need)}", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            val t = readLong(req, "timestamp", "time")
-            if (t != null && t > 0) {
-                val df = remember { SimpleDateFormat("dd MMM, yyyy h:mma", Locale.getDefault()) }
-                Text(df.format(Date(t)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-/* ------------------ Helpers ------------------ */
+/* ------------------ Shared helpers ------------------ */
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -235,6 +439,33 @@ private fun BloodGroupDropdown(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BloodGroupFilterDropdown(
+    selected: BloodGroup?,
+    onSelected: (BloodGroup?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val all = listOf<BloodGroup?>(null) + BloodGroup.values().toList()
+
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }, modifier = modifier) {
+        OutlinedTextField(
+            value = selected?.let { label(it) } ?: "All groups",
+            onValueChange = {}, readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            label = { Text("Filter") },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("All groups") }, onClick = { onSelected(null); expanded = false })
+            BloodGroup.values().forEach { bg ->
+                DropdownMenuItem(text = { Text(label(bg)) }, onClick = { onSelected(bg); expanded = false })
+            }
+        }
+    }
+}
+
 private fun label(bg: BloodGroup): String = when (bg) {
     BloodGroup.A_POS -> "A+"; BloodGroup.A_NEG -> "A-"
     BloodGroup.B_POS -> "B+"; BloodGroup.B_NEG -> "B-"
@@ -248,7 +479,49 @@ private fun formatDate(millis: Long?): String {
     return df.format(Date(millis))
 }
 
-/** Build a request object tolerant to different data-class field names (using Gson). */
+private fun BloodRequest.matchesQuery(q: String): Boolean {
+    val s = q.trim().lowercase(Locale.getDefault())
+    if (s.isBlank()) return true
+    return requesterName.lowercase(Locale.getDefault()).contains(s) ||
+            hospitalName.lowercase(Locale.getDefault()).contains(s) ||
+            locationName.lowercase(Locale.getDefault()).contains(s)
+}
+
+/** rank: 2 = today, 1 = tomorrow, 0 = later */
+private fun urgencyRank(neededOnMillis: Long): Int {
+    val (startToday, startTomorrow) = dayStartAndTomorrow()
+    val startDayAfter = startTomorrow + 24.hours
+    return when (neededOnMillis) {
+        in startToday until startTomorrow -> 2
+        in startTomorrow until startDayAfter -> 1
+        else -> 0
+    }
+}
+
+private fun urgencyLabel(neededOnMillis: Long): String? {
+    return when (urgencyRank(neededOnMillis)) {
+        2 -> "Today"
+        1 -> "Tomorrow"
+        else -> null
+    }
+}
+
+private fun dayStartAndTomorrow(): Pair<Long, Long> {
+    val cal = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    val startToday = cal.timeInMillis
+    cal.add(Calendar.DAY_OF_YEAR, 1)
+    val startTomorrow = cal.timeInMillis
+    return startToday to startTomorrow
+}
+
+private val Int.hours: Long get() = this * 60L * 60L * 1000L
+
+/* Build a request object that exactly matches your model (no Gson tricks). */
 private fun buildRequestObject(
     name: String,
     group: BloodGroup,
@@ -257,37 +530,16 @@ private fun buildRequestObject(
     contact: String,
     needMillis: Long?
 ): BloodRequest {
-    val payload = mapOf(
-        "requesterName" to name, "name" to name,
-        "bloodGroup" to label(group), "group" to label(group),
-        "hospital" to hospital, "location" to location,
-        "contactNumber" to contact, "contact" to contact, "phone" to contact,
-        "neededDateMillis" to (needMillis ?: 0L), "needDate" to (needMillis ?: 0L),
-        "dateNeeded" to (needMillis ?: 0L), "requiredOn" to (needMillis ?: 0L),
-        "timestamp" to System.currentTimeMillis(), "time" to System.currentTimeMillis(),
-        "id" to UUID.randomUUID().toString()
+    return BloodRequest(
+        requesterName = name.trim(),
+        hospitalName = hospital.trim(),
+        locationName = location.trim(),
+        bloodGroup = group,
+        phone = contact.trim(),
+        neededOnMillis = needMillis ?: System.currentTimeMillis()
     )
-    val json = Gson().toJson(payload)
-    return Gson().fromJson(json, BloodRequest::class.java)
 }
 
-/** Read a String field by trying multiple names. */
-private fun readString(any: Any, vararg names: String): String? = runCatching {
-    val c = any::class.java
-    for (n in names) try {
-        val f = c.getDeclaredField(n); f.isAccessible = true
-        (f.get(any) as? String)?.let { return it }
-    } catch (_: NoSuchFieldException) {}
-    null
-}.getOrNull()
-
-/** Read a Long/Number field by trying multiple names. */
-private fun readLong(any: Any, vararg names: String): Long? = runCatching {
-    val c = any::class.java
-    for (n in names) try {
-        val f = c.getDeclaredField(n); f.isAccessible = true
-        val v = f.get(any)
-        when (v) { is Long -> return v; is Int -> return v.toLong(); is Number -> return v.toLong(); is String -> return v.toLongOrNull() }
-    } catch (_: NoSuchFieldException) {}
-    null
-}.getOrNull()
+/** Stable key for LazyColumn item (no id in the model, so derive one) */
+private fun BloodRequest.stableKey(): String =
+    "${requesterName}-${phone}-${neededOnMillis}-${bloodGroup}"

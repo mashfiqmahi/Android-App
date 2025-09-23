@@ -1,5 +1,7 @@
 package com.example.androidbloodbank.navigation
 
+import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
@@ -27,6 +29,7 @@ import com.example.androidbloodbank.ui.flow.*
 // Firebase
 import com.google.firebase.auth.FirebaseAuth
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -196,7 +199,7 @@ fun AppNavHost(
                     onLoggedOut = {
                         // Ensure both sessions are cleared
                         runCatching { FirebaseAuth.getInstance().signOut() }
-                        repo.logoutCurrentUser()
+                        repo.saveCurrentUserJson(null)
                         navController.navigate(Route.Gate.path) {
                             popUpTo(Route.Home.path) { inclusive = true }
                             launchSingleTop = true

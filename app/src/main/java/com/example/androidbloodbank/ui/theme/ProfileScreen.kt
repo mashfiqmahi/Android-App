@@ -266,7 +266,7 @@ fun ProfileScreen(
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
-                        repo.logoutCurrentUser()
+                        repo.saveCurrentUserJson(null)
                         onLoggedOut()
                     },
                     modifier = Modifier.fillMaxWidth(),

@@ -1,15 +1,11 @@
 package com.example.androidbloodbank.data.model
 
-enum class RequestStatus { PENDING, MATCHED, CLOSED }
-
 data class BloodRequest(
     val requesterName: String,
-    val hospital: String,
-    val location: String,
-    val contactNumber: String,
-    val bloodGroup: String,
-    val neededDateMillis: Long = 0L,
-    val timestamp: Long = 0L,
-    val id: String? = null,
-    val status: RequestStatus = RequestStatus.PENDING // NEW
+    val hospitalName: String,
+    val locationName: String,
+    val bloodGroup: BloodGroup,
+    val phone: String,
+    // NEW: date the blood is needed (epoch millis). Default keeps old saved data loading fine.
+    val neededOnMillis: Long = System.currentTimeMillis()
 )
