@@ -8,5 +8,8 @@ data class BloodRequest(
     val location: String,
     val contactNumber: String,
     val bloodGroup: String,
+    val neededDateMillis: Long = 0L,
+    val timestamp: Long = 0L,
+    val id: String? = null,
     val status: RequestStatus = RequestStatus.PENDING // NEW
 )
