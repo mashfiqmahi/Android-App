@@ -47,6 +47,11 @@ fun AppNavHost(
         route.startsWith(Route.Gate.path)   -> false
         route.startsWith(Route.SignIn.path) -> false
         route.startsWith(Route.SignUp.path) -> false
+
+        // HIDE the bottom menu in Emergency mode:
+        route.startsWith(Route.EmergencySOS.path) -> false
+        // (Optional: legacy/emulator routes—keep hidden if they exist)
+        route.startsWith("emergency")            -> false
         else -> true
     }
 
