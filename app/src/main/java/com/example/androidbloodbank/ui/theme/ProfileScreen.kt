@@ -28,9 +28,12 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.androidbloodbank.data.LocalRepo
 import com.example.androidbloodbank.data.model.BloodGroup
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.runtime.rememberCoroutineScope
+import com.example.androidbloodbank.ui.util.loadUserProfileSafely
+import com.example.androidbloodbank.ui.util.saveUserProfile
+import kotlinx.coroutines.launch
 
 // ---------- small utils ----------
 private fun formatDate(millis: Long?): String {
@@ -46,7 +49,7 @@ private fun formatDate(millis: Long?): String {
     } catch (_: Exception) { "Not set" }
 }
 
-private val genderOptions = listOf("Male", "Female", "Other", "Prefer not to say")
+private val genderOptions = listOf("Male", "Female", "Prefer not to say")
 private val bloodLabels = listOf("A+","A-","B+","B-","AB+","AB-","O+","O-")
 private fun labelToEnum(label: String) = when (label) {
     "A+" -> BloodGroup.A_POS; "A-" -> BloodGroup.A_NEG
@@ -65,6 +68,7 @@ fun ProfileScreen(
 ) {
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
+    val initial = remember { loadUserProfileSafely(repo) }   // safe fallback from helper
     val context = LocalContext.current
     val scroll = rememberScrollState()
 
@@ -87,6 +91,15 @@ fun ProfileScreen(
     var lastDonationMillis by remember { mutableStateOf<Long?>(pickLong("lastDonationMillis")) }
     var photoUri by remember { mutableStateOf(pick("photoUri").ifBlank { null }) }
 
+    // Fill blanks from the safe helper (doesn't change your UI)
+    LaunchedEffect(Unit) {
+        if (name == "Your name" && initial.name.isNotBlank()) name = initial.name
+        if (bloodLabel.isBlank() && initial.bloodGroup.isNotBlank()) bloodLabel = initial.bloodGroup
+        if (phone.isBlank() && initial.contactNumber.isNotBlank()) phone = initial.contactNumber
+        if (address.isBlank() && initial.location.isNotBlank()) address = initial.location
+        if (lastDonationMillis == null && initial.lastDonationMillis != null) lastDonationMillis = initial.lastDonationMillis
+    }
+
     // date picker
     var showDatePicker by remember { mutableStateOf(false) }
     if (showDatePicker) {
@@ -107,13 +120,12 @@ fun ProfileScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            // Persist read permission so image still loads after reboot
             try {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (_: SecurityException) { /* some providers may not support persist; it's ok */ }
+            } catch (_: SecurityException) { }
             photoUri = uri.toString()
         }
     }
@@ -129,24 +141,43 @@ fun ProfileScreen(
                         TextButton(onClick = { editing = true }) { Text("Edit") }
                     } else {
                         TextButton(onClick = {
-                            // build and persist a tiny JSON snapshot (add photoUri)
-                            val json = buildString {
-                                append("{")
-                                append("\"name\":\"${name.trim()}\",")
-                                append("\"email\":\"${email.trim()}\",")
-                                append("\"phone\":\"${phone.trim()}\",")
-                                append("\"gender\":\"${gender.trim()}\",")
-                                append("\"address\":\"${address.trim()}\",")
-                                append("\"age\":${age.coerceAtLeast(0)},")
-                                append("\"bloodGroup\":\"$bloodLabel\",")
-                                append("\"lastDonationMillis\":${lastDonationMillis ?: 0L},")
-                                append("\"photoUri\":\"${photoUri ?: ""}\"")
-                                append("}")
+                            scope.launch {
+                                // 1) Push to Firebase (private profile + public donor card + extras)
+                                var cloudMsg = "Profile saved"
+                                saveUserProfile(
+                                    repo = repo,
+                                    name = name,
+                                    bloodGroup = bloodLabel,      // e.g., "A+"
+                                    contact = phone,
+                                    location = address,           // map Address -> profile.location
+                                    lastDonationMillis = lastDonationMillis,
+                                    totalDonations = null,
+                                    email = email,                // ✅ extra
+                                    gender = gender,              // ✅ extra
+                                    age = age.takeIf { it > 0 }   // ✅ extra
+                                ) { ok, msg -> cloudMsg = msg }
+
+                                // 2) Keep your extended JSON locally (UI uses this)
+                                val json = buildString {
+                                    append("{")
+                                    append("\"name\":\"${name.trim()}\",")
+                                    append("\"email\":\"${email.trim()}\",")
+                                    append("\"phone\":\"${phone.trim()}\",")
+                                    append("\"gender\":\"${gender.trim()}\",")
+                                    append("\"address\":\"${address.trim()}\",")
+                                    append("\"age\":${age.coerceAtLeast(0)},")
+                                    append("\"bloodGroup\":\"$bloodLabel\",")
+                                    append("\"lastDonationMillis\":${lastDonationMillis ?: 0L},")
+                                    append("\"photoUri\":\"${photoUri ?: ""}\"")
+                                    append("}")
+                                }
+                                repo.saveCurrentUserJson(json)
+
+                                snack.showSnackbar(cloudMsg)
+                                editing = false
                             }
-                            repo.saveCurrentUserJson(json)
-                            scope.launch { snack.showSnackbar("Profile saved") }
-                            editing = false
                         }) { Text("Save", fontWeight = FontWeight.SemiBold) }
+
                     }
                 }
             )
@@ -168,7 +199,7 @@ fun ProfileScreen(
                     .height(220.dp)
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color(0xFFFF6F00), Color(0xFFFF8A80)) // orange -> soft coral
+                            listOf(Color(0xFFFF6F00), Color(0xFFFF8A80))
                         ),
                         shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
                     )
