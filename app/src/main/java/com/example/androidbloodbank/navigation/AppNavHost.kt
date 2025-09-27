@@ -24,12 +24,11 @@ import com.example.androidbloodbank.ui.SchedulesScreen
 import com.example.androidbloodbank.ui.EmergencyScreen
 import com.example.androidbloodbank.ui.flow.*
 
-// Bottom bar
-
 // Firebase
 import com.google.firebase.auth.FirebaseAuth
 
 @RequiresApi(Build.VERSION_CODES.O)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppNavHost(
     navController: NavHostController,
@@ -112,7 +111,6 @@ fun AppNavHost(
                         }
                     }
                 )
-
             }
             composable(Route.SignUp.path) {
                 SignupScreen(
@@ -146,22 +144,38 @@ fun AppNavHost(
                     onBack = { navController.popBackStack() }
                 )
             }
-            composable(Route.ViewRequests.path) { ViewRequestsScreen(repo = repo, onBack = { navController.popBackStack() }) }
-            composable(Route.PostRequest.path)  { PostRequestScreen(repo = repo, onPosted = { navController.popBackStack() }, onBack = { navController.popBackStack() }) }
-
-            // Find donors flow
-            composable(Route.FindDonors.path) {
-                FindDonorsScreen(
+            composable(Route.ViewRequests.path) {
+                ViewRequestsScreen(repo = repo, onBack = { navController.popBackStack() })
+            }
+            // ✅ Updated: PostRequestScreen has only repo + onBack
+            composable(Route.PostRequest.path)  {
+                PostRequestScreen(
                     repo = repo,
-                    onSelectBG = { navController.navigate(Route.SelectBloodGroup.path) },
-                    onOpenDonor = { id -> navController.navigate(Route.DonorProfile.create(id)) },
                     onBack = { navController.popBackStack() }
                 )
             }
-            composable(Route.SelectBloodGroup.path) { SelectBloodGroupScreen(onDone = { navController.popBackStack() }, onBack = { navController.popBackStack() }) }
-            composable(Route.DonorProfile.path) { backStackEntry ->
-                val donorId = backStackEntry.arguments?.getString(Route.DonorProfile.ArgKey) ?: return@composable
-                DonorProfileScreen(donorId = donorId, repo = repo, onBack = { navController.popBackStack() })
+
+            // Find donors flow
+            // ✅ Updated: FindDonorsScreen has only repo + onBack
+            composable(Route.FindDonors.path) {
+                FindDonorsScreen(
+                    repo = repo,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            // You can keep this route if elsewhere in the app, but it's optional with the new FindDonorsScreen.
+            composable(Route.SelectBloodGroup.path) {
+                SelectBloodGroupScreen(
+                    onDone = { navController.popBackStack() },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            // ✅ Updated: DonorProfileScreen no longer needs donorId
+            composable(Route.DonorProfile.path) {
+                DonorProfileScreen(
+                    repo = repo,
+                    onBack = { navController.popBackStack() }
+                )
             }
 
             // Blood bank flow
@@ -172,24 +186,23 @@ fun AppNavHost(
                     onBack      = { navController.popBackStack() }
                 )
             }
-            composable(Route.NearbyBloodBank.path) { NearbyBloodBankScreen(onBack = { navController.popBackStack() }) }
-            composable(Route.AvailableBlood.path) { AvailableBloodScreen(onBack = { navController.popBackStack() }) }
+            composable(Route.NearbyBloodBank.path) {
+                NearbyBloodBankScreen(onBack = { navController.popBackStack() })
+            }
+            composable(Route.AvailableBlood.path) {
+                AvailableBloodScreen(onBack = { navController.popBackStack() })
+            }
 
             // Request blood
             composable(Route.RequestBlood.path) {
-                var snack by remember { mutableStateOf<String?>(null) }
-                snack?.let { msg ->
-                    LaunchedEffect(msg) {
-                        snackbarHostState.showSnackbar(message = msg, withDismissAction = true)
-                        snack = null
-                    }
-                }
                 RequestBloodScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() }
                 )
             }
-            composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { navController.popBackStack() }) }
+            composable(Route.TrackRequest.path) {
+                TrackRequestScreen(repo = repo, onBack = { navController.popBackStack() })
+            }
 
             // Profile (with proper sign-out)
             composable(Route.Profile.path) {

@@ -26,14 +26,30 @@ import java.util.Date
 import java.util.Locale
 import com.example.androidbloodbank.ui.util.SafeText
 import com.example.androidbloodbank.ui.util.nn
+import com.example.androidbloodbank.data.remote.FirebaseRepo
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 
-
+private const val DB_URL =
+    "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewRequestsScreen(repo: LocalRepo, onBack: () -> Unit) {
     // Fail-safe load: if anything goes wrong, show empty list instead of crashing
     val requests by remember {
         mutableStateOf(runCatching { repo.loadRequests() }.getOrElse { mutableListOf<BloodRequest>() })
+    }
+    val firebase = remember { FirebaseRepo() }
+    var cloudRequests by remember { mutableStateOf<List<BloodRequest>>(emptyList()) }
+
+    DisposableEffect(Unit) {
+        val listener = firebase.observeMyRequests { cloudRequests = it }
+        onDispose {
+            // Remove if you prefer a single-shot 'get' instead of a live listener:
+            FirebaseDatabase.getInstance(DB_URL).reference
+                .child("requests").child(FirebaseAuth.getInstance().currentUser?.uid ?: return@onDispose)
+                .removeEventListener(listener)
+        }
     }
 
     Scaffold(

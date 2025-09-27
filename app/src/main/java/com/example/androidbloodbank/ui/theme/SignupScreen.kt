@@ -13,9 +13,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
+import com.example.androidbloodbank.data.model.UserProfile            // ✅ NEW
+import com.example.androidbloodbank.data.remote.FirebaseRepo          // ✅ ensure this import
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseAuthException
-import com.google.firebase.database.FirebaseDatabase
 import com.google.gson.Gson
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -32,7 +33,7 @@ fun SignupScreen(
     val scope = rememberCoroutineScope()
 
     val auth = remember { FirebaseAuth.getInstance() }
-    val dbRef = remember { FirebaseDatabase.getInstance().reference } // optional profile save
+    val firebase = remember { FirebaseRepo() }                       // ✅ use FirebaseRepo
 
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
@@ -67,17 +68,19 @@ fun SignupScreen(
                 return
             }
 
-            // 2) Optional: store public profile to Realtime Database
-            val profile = mapOf(
-                "uid" to uid,
-                "name" to name.trim(),
-                "email" to email.trim(),
-                "phone" to phone.trim().ifEmpty { null }
+            // 2) Build initial profile and save to Realtime Database via FirebaseRepo  ✅ NEW
+            val profile = UserProfile(
+                name = name.trim(),
+                bloodGroup = "",                 // if you collect it later, keep empty for now
+                lastDonationMillis = null,
+                totalDonations = 0,
+                contactNumber = phone.trim(),
+                location = ""                    // fill later from profile screen
             )
-            // Don’t block UX if DB write fails; but we try with timeout
-            withTimeoutOrNull(10_000) {
-                dbRef.child("users").child(uid).setValue(profile).await()
-            }
+
+            // Don’t block the UX too long on network I/O
+            withTimeoutOrNull(10_000) { firebase.saveProfile(profile) }
+            withTimeoutOrNull(10_000) { firebase.publishDonorCard(profile) } // public, for discovery
 
             // 3) Optional: keep a tiny local session snapshot so your Splash/Gate logic works
             repo.saveCurrentUserJson(Gson().toJson(profile))
@@ -107,7 +110,9 @@ fun SignupScreen(
             TopAppBar(
                 title = { Text("Sign up") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
+                    }
                 }
             )
         },
@@ -156,7 +161,9 @@ fun SignupScreen(
             Button(
                 onClick = { scope.launch { doSignup() } },
                 enabled = canSubmit() && !loading,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
             ) {
                 if (loading) {
                     CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
