@@ -25,6 +25,7 @@ import com.example.androidbloodbank.data.remote.FirebaseRepo
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.material.icons.outlined.Phone
 
 private const val ELIGIBLE_AFTER_DAYS = 90
 
@@ -213,6 +214,7 @@ private fun DonorCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
+
             ) {
                 OutlinedButton(
                     onClick = onViewDetails,
@@ -225,9 +227,11 @@ private fun DonorCard(
                     onClick = { if (canCall) onCall(phone) },
                     enabled = canCall,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(14.dp),
+
                 ) {
-                    Text("Call")
+                    Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
+
                 }
             }
         }

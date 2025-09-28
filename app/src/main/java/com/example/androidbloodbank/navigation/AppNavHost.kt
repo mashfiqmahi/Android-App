@@ -3,7 +3,14 @@ package com.example.androidbloodbank.navigation
 import android.os.Build
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AddCircle
+import androidx.compose.material.icons.outlined.Bloodtype
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,21 +18,21 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.androidbloodbank.data.LocalRepo
-
-// Screens
-import com.example.androidbloodbank.ui.screens.HomeScreen
-import com.example.androidbloodbank.ui.screens.ProfileScreen
-import com.example.androidbloodbank.ui.screens.RequestBloodScreen
+import com.example.androidbloodbank.ui.EmergencyScreen
 import com.example.androidbloodbank.ui.LoginScreen
 import com.example.androidbloodbank.ui.SignupScreen
 import com.example.androidbloodbank.ui.SchedulesScreen
-import com.example.androidbloodbank.ui.EmergencyScreen
 import com.example.androidbloodbank.ui.flow.*
-
-// Firebase
+import com.example.androidbloodbank.ui.screens.HomeScreen
+import com.example.androidbloodbank.ui.screens.ProfileScreen
+import com.example.androidbloodbank.ui.screens.RequestBloodScreen
 import com.google.firebase.auth.FirebaseAuth
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+
+private const val TabsRoute = "tabs_shell"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,21 +44,8 @@ fun AppNavHost(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // show bottom bar on main app sections only
-    val backStack by navController.currentBackStackEntryAsState()
-    val route = backStack?.destination?.route
-    val showBottomBar = when {
-        route == null -> false
-        route.startsWith(Route.Splash.path) -> false
-        route.startsWith(Route.Gate.path)   -> false
-        route.startsWith(Route.SignIn.path) -> false
-        route.startsWith(Route.SignUp.path) -> false
-        else -> true
-    }
-
     Scaffold(
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        bottomBar = { if (showBottomBar) BottomNavBar(navController) }
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
 
         NavHost(
@@ -59,65 +53,58 @@ fun AppNavHost(
             startDestination = Route.Splash.path,
             modifier = Modifier.padding(padding)
         ) {
-            // Splash — decide start based on Firebase or local session
+            // ---------- Splash / Gate / Auth ----------
             composable(Route.Splash.path) {
                 val auth = remember { FirebaseAuth.getInstance() }
                 val hasLocal = remember { repo.loadCurrentUserJson() != null }
                 LaunchedEffect(Unit) {
-                    val dest = if (auth.currentUser != null || hasLocal) Route.Home.path else Route.Gate.path
+                    val dest = if (auth.currentUser != null || hasLocal) TabsRoute else Route.Gate.path
                     navController.navigate(dest) {
                         popUpTo(Route.Splash.path) { inclusive = true }
                         launchSingleTop = true
                     }
                 }
-                Box(Modifier, contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
             }
 
-            // Gate: ONLY Login, Sign up, Emergency SOS
             composable(Route.Gate.path) {
                 val auth = remember { FirebaseAuth.getInstance() }
-                // If already logged in, bounce to Home
                 LaunchedEffect(auth.currentUser, repo.loadCurrentUserJson()) {
                     if (auth.currentUser != null || repo.loadCurrentUserJson() != null) {
-                        navController.navigate(Route.Home.path) {
+                        navController.navigate(TabsRoute) {
                             popUpTo(Route.Gate.path) { inclusive = true }
                             launchSingleTop = true
                         }
                     }
                 }
                 AccountGateScreen(
-                    onLogin = { navController.navigate(Route.SignIn.path) },
-                    onSignUp = { navController.navigate(Route.SignUp.path) },
+                    onLogin     = { navController.navigate(Route.SignIn.path) },
+                    onSignUp    = { navController.navigate(Route.SignUp.path) },
                     onEmergency = { navController.navigate(Route.EmergencySOS.path) }
                 )
             }
 
-            // Emergency SOS (offline)
-            composable(Route.EmergencySOS.path) {
-                EmergencySosScreen(repo = repo, onBack = { navController.popBackStack() })
-            }
-
-            // Auth
             composable(Route.SignIn.path) {
                 LoginScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() },
                     onLoginSuccess = {
-                        navController.navigate(Route.Home.path) {
+                        navController.navigate(TabsRoute) {
                             popUpTo(Route.Gate.path) { inclusive = true }
                             launchSingleTop = true
                         }
                     }
                 )
             }
+
             composable(Route.SignUp.path) {
                 SignupScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() },
                     onSignupSuccess = {
-                        navController.navigate(Route.Home.path) {
+                        navController.navigate(TabsRoute) {
                             popUpTo(Route.Gate.path) { inclusive = true }
                             launchSingleTop = true
                         }
@@ -125,133 +112,197 @@ fun AppNavHost(
                 )
             }
 
-            // HOME
-            composable(Route.Home.path) {
-                HomeScreen(
-                    onDonate       = { navController.navigate(Route.Donate.path) },
-                    onFindDonors   = { navController.navigate(Route.FindDonors.path) },
-                    onBloodBank    = { navController.navigate(Route.BloodBank.path) },
-                    onRequestBlood = { navController.navigate(Route.RequestBlood.path) },
-                    onProfile      = { navController.navigate(Route.Profile.path) }
-                )
+            composable(Route.EmergencySOS.path) {
+                EmergencySosScreen(repo = repo, onBack = { navController.popBackStack() })
             }
 
-            // Donate flow
-            composable(Route.Donate.path) {
-                DonateScreen(
-                    onViewRequests = { navController.navigate(Route.ViewRequests.path) },
-                    onPostRequest  = { navController.navigate(Route.PostRequest.path) },
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable(Route.ViewRequests.path) {
-                ViewRequestsScreen(repo = repo, onBack = { navController.popBackStack() })
-            }
-            // ✅ Updated: PostRequestScreen has only repo + onBack
-            // Donate flow
-            composable(Route.Donate.path) {
-                DonateScreen(
-                    onViewRequests = { navController.navigate(Route.ViewRequests.path) },
-                    onPostRequest  = { navController.navigate(Route.PostRequest.path) },
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable(Route.ViewRequests.path) {
-                ViewRequestsScreen(
-                    repo = repo,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable(Route.PostRequest.path) {
-                PostRequestScreen(
-                    repo = repo,
-                    onPosted = {
-                        // After posting, go back to the previous screen
-                        navController.popBackStack()
-                    },
-                    onBack = { navController.popBackStack() }
-                )
-            }
-
-
-            // Find donors flow
-            // ✅ Updated: FindDonorsScreen has only repo + onBack
-            composable(Route.FindDonors.path) {
-                FindDonorsScreen(
-                    repo = repo,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            // You can keep this route if elsewhere in the app, but it's optional with the new FindDonorsScreen.
-            composable(Route.SelectBloodGroup.path) {
-                SelectBloodGroupScreen(
-                    onDone = { navController.popBackStack() },
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            // ✅ Updated: DonorProfileScreen no longer needs donorId
-            composable(Route.DonorProfile.path) {
-                DonorProfileScreen(
-                    repo = repo,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-
-            // Blood bank flow
-            composable(Route.BloodBank.path) {
-                BloodBankScreen(
-                    onNearby    = { navController.navigate(Route.NearbyBloodBank.path) },
-                    onAvailable = { navController.navigate(Route.AvailableBlood.path) },
-                    onBack      = { navController.popBackStack() }
-                )
-            }
-            composable(Route.NearbyBloodBank.path) {
-                NearbyBloodBankScreen(onBack = { navController.popBackStack() })
-            }
-            composable(Route.AvailableBlood.path) {
-                AvailableBloodScreen(onBack = { navController.popBackStack() })
-            }
-
-            // Request blood
-            composable(Route.RequestBlood.path) {
-                RequestBloodScreen(
-                    repo = repo,
-                    onBack = { navController.popBackStack() }
-                )
-            }
-            composable(Route.TrackRequest.path) {
-                TrackRequestScreen(repo = repo, onBack = { navController.popBackStack() })
-            }
-
-            // Profile (with proper sign-out)
-            composable(Route.Profile.path) {
-                ProfileScreen(
-                    repo = repo,
-                    onBack = { navController.popBackStack() },
-                    onLoggedOut = {
-                        // Ensure both sessions are cleared
-                        runCatching { FirebaseAuth.getInstance().signOut() }
-                        repo.saveCurrentUserJson(null)
-                        navController.navigate(Route.Gate.path) {
-                            popUpTo(Route.Home.path) { inclusive = true }
-                            launchSingleTop = true
-                        }
+            // ---------- The tabs shell (one NavController per tab) ----------
+            composable(TabsRoute) {
+                TabsShell(repo = repo, onLogout = {
+                    runCatching { FirebaseAuth.getInstance().signOut() }
+                    repo.saveCurrentUserJson(null)
+                    navController.navigate(Route.Gate.path) {
+                        popUpTo(TabsRoute) { inclusive = true }
+                        launchSingleTop = true
                     }
-                )
+                })
             }
 
-            // Optional legacy entries
+            // Optional legacy/debug outside tabs
             composable("schedules") { SchedulesScreen(repo = repo, onBack = { navController.popBackStack() }) }
             composable("emergency") { EmergencyScreen(repo = repo, onBack = { navController.popBackStack() }) }
-
-
-            // TEMP debug route — remove later
             composable("debugFirebase") {
-                com.example.androidbloodbank.ui.debug.FirebaseDebugScreen(
-                    onBack = { navController.popBackStack() }
+                com.example.androidbloodbank.ui.debug.FirebaseDebugScreen(onBack = { navController.popBackStack() })
+            }
+        }
+    }
+}
+
+/* ---------------- Tabs shell with 5 independent NavControllers ---------------- */
+
+private enum class Tab { HOME, DONORS, REQUESTS, BANK, PROFILE }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TabsShell(
+    repo: LocalRepo,
+    onLogout: () -> Unit
+) {
+    // One controller per tab (they persist across recompositions)
+    val homeNav     = rememberNavController()
+    val donorsNav   = rememberNavController()
+    val requestsNav = rememberNavController()
+    val bankNav     = rememberNavController()
+    val profileNav  = rememberNavController()
+
+    var currentTab by remember { mutableStateOf(Tab.HOME) }
+
+    // Save/restore UI state when a tab leaves composition
+    val stateHolder = rememberSaveableStateHolder()
+
+    // Double-tap to root: pop this tab back stack to its start
+    fun popToRoot(tab: Tab) {
+        val (ctrl, startRoute) = when (tab) {
+            Tab.HOME     -> homeNav to Route.Home.path
+            Tab.DONORS   -> donorsNav to Route.FindDonors.path
+            Tab.REQUESTS -> requestsNav to Route.RequestBlood.path
+            Tab.BANK     -> bankNav to Route.BloodBank.path
+            Tab.PROFILE  -> profileNav to Route.Profile.path
+        }
+        ctrl.popBackStack(startRoute, inclusive = false)
+    }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = currentTab == Tab.HOME,
+                    onClick = { if (currentTab == Tab.HOME) popToRoot(Tab.HOME) else currentTab = Tab.HOME },
+                    icon = { Icon(Icons.Outlined.Home, null) }, label = { Text("Home") }
+                )
+                NavigationBarItem(
+                    selected = currentTab == Tab.DONORS,
+                    onClick = { if (currentTab == Tab.DONORS) popToRoot(Tab.DONORS) else currentTab = Tab.DONORS },
+                    icon = { Icon(Icons.Outlined.Search, null) }, label = { Text("Donors") }
+                )
+                NavigationBarItem(
+                    selected = currentTab == Tab.REQUESTS,
+                    onClick = { if (currentTab == Tab.REQUESTS) popToRoot(Tab.REQUESTS) else currentTab = Tab.REQUESTS },
+                    icon = { Icon(Icons.Outlined.AddCircle, null) }, label = { Text("Request") }
+                )
+                NavigationBarItem(
+                    selected = currentTab == Tab.BANK,
+                    onClick = { if (currentTab == Tab.BANK) popToRoot(Tab.BANK) else currentTab = Tab.BANK },
+                    icon = { Icon(Icons.Outlined.Bloodtype, null) }, label = { Text("Bank") }
+                )
+                NavigationBarItem(
+                    selected = currentTab == Tab.PROFILE,
+                    onClick = { if (currentTab == Tab.PROFILE) popToRoot(Tab.PROFILE) else currentTab = Tab.PROFILE },
+                    icon = { Icon(Icons.Outlined.Person, null) }, label = { Text("Profile") }
                 )
             }
+        }
+    ) { padding ->
 
+        // Keep only the current tab composed, but SAVE the others' state
+        when (currentTab) {
+            /* ---------- HOME TAB ---------- */
+            Tab.HOME -> stateHolder.SaveableStateProvider("tab_home") {
+                NavHost(
+                    navController = homeNav,
+                    startDestination = Route.Home.path,
+                    modifier = Modifier.padding(padding)
+                ) {
+                    composable(Route.Home.path) {
+                        HomeScreen(
+                            onDonate       = { homeNav.navigate(Route.Donate.path) },
+                            onFindDonors   = { currentTab = Tab.DONORS },   // jump to tab
+                            onBloodBank    = { currentTab = Tab.BANK },
+                            onRequestBlood = { currentTab = Tab.REQUESTS },
+                            onProfile      = { currentTab = Tab.PROFILE }
+                        )
+                    }
+                    composable(Route.Donate.path) {
+                        DonateScreen(
+                            onViewRequests = { homeNav.navigate(Route.ViewRequests.path) },
+                            // ✅ stay INSIDE HOME for Post Request so the form is preserved in Home stack
+                            onPostRequest  = { homeNav.navigate(Route.PostRequest.path) },
+                            onBack = { homeNav.popBackStack() }
+                        )
+                    }
+                    composable(Route.ViewRequests.path) {
+                        RequestsMatchedScreen(repo = repo, onBack = { homeNav.popBackStack() })
+                    }
+                    // ✅ Include the Post Request form INSIDE HOME tab
+                    composable(Route.PostRequest.path) {
+                        PostRequestScreen(
+                            repo = repo,
+                            onPosted = { homeNav.popBackStack() },
+                            onBack   = { homeNav.popBackStack() }
+                        )
+                    }
+                }
+            }
+
+            /* ---------- DONORS TAB ---------- */
+            Tab.DONORS -> stateHolder.SaveableStateProvider("tab_donors") {
+                NavHost(donorsNav, startDestination = Route.FindDonors.path, modifier = Modifier.padding(padding)) {
+                    composable(Route.FindDonors.path) { FindDonorsScreen(repo = repo, onBack = { /* root */ }) }
+                    composable(Route.SelectBloodGroup.path) {
+                        SelectBloodGroupScreen(onDone = { donorsNav.popBackStack() }, onBack = { donorsNav.popBackStack() })
+                    }
+                    composable(Route.DonorProfile.path) { DonorProfileScreen(repo = repo, onBack = { donorsNav.popBackStack() }) }
+                }
+            }
+
+            /* ---------- REQUESTS TAB ---------- */
+            Tab.REQUESTS -> stateHolder.SaveableStateProvider("tab_requests") {
+                NavHost(requestsNav, startDestination = Route.RequestBlood.path, modifier = Modifier.padding(padding)) {
+                    composable(Route.RequestBlood.path) {
+                        RequestsFeedScreen(
+                            repo = repo,
+                            onBack = { /* root */ },
+                            onRequestNew = { requestsNav.navigate(Route.PostRequest.path) }
+                        )
+                    }
+                    composable(Route.PostRequest.path) {
+                        PostRequestScreen(
+                            repo = repo,
+                            onPosted = { requestsNav.popBackStack() },
+                            onBack = { requestsNav.popBackStack() }
+                        )
+                    }
+                    composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { requestsNav.popBackStack() }) }
+                }
+            }
+
+            /* ---------- BANK TAB ---------- */
+            Tab.BANK -> stateHolder.SaveableStateProvider("tab_bank") {
+                NavHost(bankNav, startDestination = Route.BloodBank.path, modifier = Modifier.padding(padding)) {
+                    composable(Route.BloodBank.path) {
+                        BloodBankScreen(
+                            onNearby    = { bankNav.navigate(Route.NearbyBloodBank.path) },
+                            onAvailable = { bankNav.navigate(Route.AvailableBlood.path) },
+                            onBack      = { bankNav.popBackStack() }
+                        )
+                    }
+                    composable(Route.NearbyBloodBank.path)  { NearbyBloodBankScreen(onBack = { bankNav.popBackStack() }) }
+                    composable(Route.AvailableBlood.path)   { AvailableBloodScreen(onBack = { bankNav.popBackStack() }) }
+                }
+            }
+
+            /* ---------- PROFILE TAB ---------- */
+            Tab.PROFILE -> stateHolder.SaveableStateProvider("tab_profile") {
+                NavHost(profileNav, startDestination = Route.Profile.path, modifier = Modifier.padding(padding)) {
+                    composable(Route.Profile.path) {
+                        ProfileScreen(
+                            repo = repo,
+                            onBack = { /* root */ },
+                            onLoggedOut = onLogout
+                        )
+                    }
+                }
+            }
         }
     }
 }

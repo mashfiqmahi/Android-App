@@ -6,17 +6,23 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
 import com.example.androidbloodbank.data.model.BloodGroup
 import com.example.androidbloodbank.data.model.BloodRequest
+import com.example.androidbloodbank.ui.flow.BloodGroupSaver
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 private const val SG_DB_URL =
     "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
 
@@ -31,12 +37,12 @@ fun RequestBloodScreen(
     val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val db = FirebaseDatabase.getInstance(SG_DB_URL).reference
 
-    var requester by remember { mutableStateOf("") }
-    var hospital by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var group by remember { mutableStateOf(BloodGroup.O_POS) }
-    var needed by remember { mutableStateOf(0L) }
+    var requester by rememberSaveable  { mutableStateOf("") }
+    var hospital by rememberSaveable  { mutableStateOf("") }
+    var location by rememberSaveable  { mutableStateOf("") }
+    var phone by rememberSaveable  { mutableStateOf("") }
+    var group by rememberSaveable(stateSaver = BloodGroupSaver) { mutableStateOf(BloodGroup.O_POS) }
+    var needed by rememberSaveable { mutableStateOf(0L) }
     var showDate by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
 

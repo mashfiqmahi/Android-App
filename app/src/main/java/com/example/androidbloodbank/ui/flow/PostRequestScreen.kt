@@ -16,10 +16,17 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 
 private const val SG_DB_URL =
     "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
 
+// For enum BloodGroup we need a Saver:
+val BloodGroupSaver = Saver<BloodGroup, String>(
+    save = { it.name },
+    restore = { runCatching { BloodGroup.valueOf(it) }.getOrDefault(BloodGroup.O_POS) }
+)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostRequestScreen(
@@ -30,12 +37,12 @@ fun PostRequestScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var requester by remember { mutableStateOf("") }
-    var hospital by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var group by remember { mutableStateOf(BloodGroup.O_POS) }
-    var needed by remember { mutableStateOf(0L) }
+    var requester by rememberSaveable  { mutableStateOf("") }
+    var hospital by rememberSaveable  { mutableStateOf("") }
+    var location by rememberSaveable  { mutableStateOf("") }
+    var phone by rememberSaveable  { mutableStateOf("") }
+    var group by rememberSaveable(stateSaver = BloodGroupSaver) { mutableStateOf(BloodGroup.O_POS) }
+    var needed by rememberSaveable { mutableStateOf(0L) }
     var showDate by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
 
