@@ -33,7 +33,14 @@ import java.util.*
 import androidx.compose.runtime.rememberCoroutineScope
 import com.example.androidbloodbank.ui.util.loadUserProfileSafely
 import com.example.androidbloodbank.ui.util.saveUserProfile
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+
+// ---- DB URL for your regioned Realtime Database ----
+private const val DB_URL =
+    "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
 
 // ---------- small utils ----------
 private fun formatDate(millis: Long?): String {
@@ -68,16 +75,18 @@ fun ProfileScreen(
 ) {
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
-    val initial = remember { loadUserProfileSafely(repo) }   // safe fallback from helper
+    val initial = remember { loadUserProfileSafely(repo) }   // safe fallback if local is old/corrupt
     val context = LocalContext.current
     val scroll = rememberScrollState()
 
-    // pull whatever you saved last time; safe parsing with regex
+    // pull whatever you saved last time; safe parsing with regex (keeps your UI)
     val current = remember { repo.loadCurrentUserJson() }
     fun pick(field: String, def: String = "") =
         Regex("\"$field\"\\s*:\\s*\"([^\"]*)\"").find(current ?: "")?.groupValues?.getOrNull(1) ?: def
     fun pickLong(field: String) =
         Regex("\"$field\"\\s*:\\s*(\\d+)").find(current ?: "")?.groupValues?.getOrNull(1)?.toLongOrNull()
+    fun pickInt(field: String) =
+        Regex("\"$field\"\\s*:\\s*(\\d+)").find(current ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull()
 
     var editing by remember { mutableStateOf(false) }
 
@@ -86,18 +95,59 @@ fun ProfileScreen(
     var phone by remember { mutableStateOf(pick("phone")) }
     var gender by remember { mutableStateOf(pick("gender")) }
     var address by remember { mutableStateOf(pick("address")) }
-    var age by remember { mutableStateOf(Regex("\"age\"\\s*:\\s*(\\d+)").find(current ?: "")?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0) }
+    var age by remember { mutableStateOf(pickInt("age") ?: 0) }
     var bloodLabel by remember { mutableStateOf(pick("bloodGroup").ifBlank { "O+" }.let { if (it in bloodLabels) it else "O+" }) }
     var lastDonationMillis by remember { mutableStateOf<Long?>(pickLong("lastDonationMillis")) }
     var photoUri by remember { mutableStateOf(pick("photoUri").ifBlank { null }) }
 
-    // Fill blanks from the safe helper (doesn't change your UI)
+    // ---- NEW: Load the canonical data from Firebase on first composition ----
     LaunchedEffect(Unit) {
-        if (name == "Your name" && initial.name.isNotBlank()) name = initial.name
-        if (bloodLabel.isBlank() && initial.bloodGroup.isNotBlank()) bloodLabel = initial.bloodGroup
-        if (phone.isBlank() && initial.contactNumber.isNotBlank()) phone = initial.contactNumber
-        if (address.isBlank() && initial.location.isNotBlank()) address = initial.location
-        if (lastDonationMillis == null && initial.lastDonationMillis != null) lastDonationMillis = initial.lastDonationMillis
+        runCatching {
+            val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@LaunchedEffect
+            val snap = FirebaseDatabase.getInstance(DB_URL).reference
+                .child("users").child(uid).child("profile")
+                .get().await()
+            if (!snap.exists()) return@LaunchedEffect
+
+            val nameC   = snap.child("name").getValue(String::class.java) ?: ""
+            val emailC  = snap.child("email").getValue(String::class.java) ?: ""
+            val phoneC  = snap.child("contactNumber").getValue(String::class.java) ?: ""
+            val genderC = snap.child("gender").getValue(String::class.java) ?: ""
+            val addrC   = snap.child("location").getValue(String::class.java) ?: ""
+            val ageC    = snap.child("age").getValue(Int::class.java) ?: 0
+            val bgC     = snap.child("bloodGroup").getValue(String::class.java) ?: ""
+            val lastC   = snap.child("lastDonationMillis").getValue(Long::class.java)
+            val photoC  = snap.child("photoUrl").getValue(String::class.java) // https://...
+
+            // Update UI state with cloud values (canonical)
+            if (nameC.isNotBlank()) name = nameC
+            if (emailC.isNotBlank()) email = emailC
+            if (phoneC.isNotBlank()) phone = phoneC
+            if (genderC.isNotBlank()) gender = genderC
+            if (addrC.isNotBlank()) address = addrC
+            if (ageC > 0) age = ageC
+            if (bgC.isNotBlank() && bgC in bloodLabels) bloodLabel = bgC
+            if (lastC != null && lastC > 0L) lastDonationMillis = lastC
+            if (!photoC.isNullOrBlank()) photoUri = photoC  // ok for AsyncImage
+
+            // Also refresh your local JSON snapshot so future picks() are correct
+            val localJson = buildString {
+                append("{")
+                append("\"name\":\"${name.trim()}\",")
+                append("\"email\":\"${email.trim()}\",")
+                append("\"phone\":\"${phone.trim()}\",")
+                append("\"gender\":\"${gender.trim()}\",")
+                append("\"address\":\"${address.trim()}\",")
+                append("\"age\":${age.coerceAtLeast(0)},")
+                append("\"bloodGroup\":\"$bloodLabel\",")
+                append("\"lastDonationMillis\":${lastDonationMillis ?: 0L},")
+                append("\"photoUri\":\"${photoUri ?: ""}\"")
+                append("}")
+            }
+            repo.saveCurrentUserJson(localJson)
+        }.onFailure {
+            // swallow; UI still shows local snapshot
+        }
     }
 
     // date picker
@@ -142,22 +192,23 @@ fun ProfileScreen(
                     } else {
                         TextButton(onClick = {
                             scope.launch {
-                                // 1) Push to Firebase (private profile + public donor card + extras)
+                                // 1) Push to Firebase (private profile + public donor card + extras + photo)
                                 var cloudMsg = "Profile saved"
                                 saveUserProfile(
                                     repo = repo,
                                     name = name,
                                     bloodGroup = bloodLabel,      // e.g., "A+"
                                     contact = phone,
-                                    location = address,           // map Address -> profile.location
+                                    location = address,           // Address -> profile.location
                                     lastDonationMillis = lastDonationMillis,
                                     totalDonations = null,
-                                    email = email,                // ✅ extra
-                                    gender = gender,              // ✅ extra
-                                    age = age.takeIf { it > 0 }   // ✅ extra
+                                    email = email,
+                                    gender = gender,
+                                    age = age.takeIf { it > 0 },
+                                    photoUri = photoUri
                                 ) { ok, msg -> cloudMsg = msg }
 
-                                // 2) Keep your extended JSON locally (UI uses this)
+                                // 2) Preserve your extended fields locally (keeps UI consistent)
                                 val json = buildString {
                                     append("{")
                                     append("\"name\":\"${name.trim()}\",")
@@ -177,7 +228,6 @@ fun ProfileScreen(
                                 editing = false
                             }
                         }) { Text("Save", fontWeight = FontWeight.SemiBold) }
-
                     }
                 }
             )
@@ -199,7 +249,7 @@ fun ProfileScreen(
                     .height(220.dp)
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color(0xFFFF6F00), Color(0xFFFF8A80))
+                            listOf(Color(0xFFFF6F00), Color(0xFFFF8A80)) // orange -> soft coral
                         ),
                         shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
                     )

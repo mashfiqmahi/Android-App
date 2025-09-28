@@ -148,12 +148,31 @@ fun AppNavHost(
                 ViewRequestsScreen(repo = repo, onBack = { navController.popBackStack() })
             }
             // ✅ Updated: PostRequestScreen has only repo + onBack
-            composable(Route.PostRequest.path)  {
-                PostRequestScreen(
+            // Donate flow
+            composable(Route.Donate.path) {
+                DonateScreen(
+                    onViewRequests = { navController.navigate(Route.ViewRequests.path) },
+                    onPostRequest  = { navController.navigate(Route.PostRequest.path) },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable(Route.ViewRequests.path) {
+                ViewRequestsScreen(
                     repo = repo,
                     onBack = { navController.popBackStack() }
                 )
             }
+            composable(Route.PostRequest.path) {
+                PostRequestScreen(
+                    repo = repo,
+                    onPosted = {
+                        // After posting, go back to the previous screen
+                        navController.popBackStack()
+                    },
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
 
             // Find donors flow
             // ✅ Updated: FindDonorsScreen has only repo + onBack
@@ -224,6 +243,15 @@ fun AppNavHost(
             // Optional legacy entries
             composable("schedules") { SchedulesScreen(repo = repo, onBack = { navController.popBackStack() }) }
             composable("emergency") { EmergencyScreen(repo = repo, onBack = { navController.popBackStack() }) }
+
+
+            // TEMP debug route — remove later
+            composable("debugFirebase") {
+                com.example.androidbloodbank.ui.debug.FirebaseDebugScreen(
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
         }
     }
 }

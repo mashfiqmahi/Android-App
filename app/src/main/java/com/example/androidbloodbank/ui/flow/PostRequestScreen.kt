@@ -1,174 +1,152 @@
 package com.example.androidbloodbank.ui.flow
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
 import com.example.androidbloodbank.data.model.BloodGroup
 import com.example.androidbloodbank.data.model.BloodRequest
-import com.example.androidbloodbank.data.remote.FirebaseRepo
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.tasks.await
+
+private const val SG_DB_URL =
+    "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostRequestScreen(
     repo: LocalRepo,
+    onPosted: () -> Unit,
     onBack: () -> Unit
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-    val firebase = remember { FirebaseRepo() }
 
     var requester by remember { mutableStateOf("") }
     var hospital by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
-    var selectedGroup by remember { mutableStateOf<BloodGroup?>(null) }
-    var groupMenuExpanded by remember { mutableStateOf(false) }
+    var group by remember { mutableStateOf(BloodGroup.O_POS) }
+    var needed by remember { mutableStateOf(0L) }
+    var showDate by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
 
-    fun canSubmit(): Boolean =
-        requester.trim().length >= 2 &&
-                !phone.trim().isEmpty() &&
-                selectedGroup != null
-
-    suspend fun submit() {
-        loading = true
-        try {
-            val req = BloodRequest(
-                requesterName = requester.trim(),
-                hospitalName = hospital.trim(),
-                locationName = location.trim(),
-                bloodGroup = selectedGroup!!,
-                phone = phone.trim(),
-                neededOnMillis = System.currentTimeMillis()
-            )
-
-            // --- Local: append to saved requests list ---
-            val existing = runCatching { repo.loadRequests() }.getOrElse { mutableListOf() }
-            val updated = existing.toMutableList().apply { add(0, req) }
-            runCatching { repo.saveRequests(updated) }
-
-            // --- Cloud: push to Firebase (non-blocking with timeout) ---
-            withTimeoutOrNull(10_000) { firebase.addBloodRequest(req) }
-
-            snackbarHostState.showSnackbar("Request posted.")
-            onBack()
-        } catch (e: Exception) {
-            snackbarHostState.showSnackbar(e.localizedMessage ?: "Failed to post request.")
-        } finally {
-            loading = false
+    if (showDate) {
+        DatePickerDialog(
+            onDismissRequest = { showDate = false },
+            confirmButton = { TextButton(onClick = { showDate = false }) { Text("Done") } }
+        ) {
+            val state = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+            DatePicker(state = state, title = { Text("Needed on") })
+            LaunchedEffect(state.selectedDateMillis) { needed = state.selectedDateMillis ?: needed }
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Post Blood Request") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Outlined.ArrowBack, contentDescription = "Back")
-                    }
-                }
+                title = { Text("Post blood request") },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Outlined.ArrowBack, null) } }
             )
         },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbar) }
     ) { padding ->
         Column(
-            modifier = Modifier
+            Modifier
+                .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            OutlinedTextField(value = requester, onValueChange = { requester = it }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = hospital, onValueChange = { hospital = it }, label = { Text("Hospital/Clinic") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = location, onValueChange = { location = it }, label = { Text("Location") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
-                value = requester,
-                onValueChange = { v: String -> requester = v },
-                label = { Text("Requester name") },
+                value = phone,
+                onValueChange = { phone = it.filter { c -> c.isDigit() || c == '+' }.take(16) },
+                label = { Text("Contact number") },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = hospital,
-                onValueChange = { v: String -> hospital = v },
-                label = { Text("Hospital / Clinic") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = location,
-                onValueChange = { v: String -> location = v },
-                label = { Text("Location (area/city)") },
-                singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Phone),
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // ---- Blood group selector ----
-            ExposedDropdownMenuBox(
-                expanded = groupMenuExpanded,
-                onExpandedChange = { expanded: Boolean -> groupMenuExpanded = expanded },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                TextField(
-                    value = selectedGroup?.toString() ?: "",
+            var bgExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(expanded = bgExpanded, onExpandedChange = { bgExpanded = !bgExpanded }) {
+                OutlinedTextField(
+                    value = group.toString(),
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Blood group") },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = groupMenuExpanded) },
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth()
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = bgExpanded) },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
                 )
-                ExposedDropdownMenu(
-                    expanded = groupMenuExpanded,
-                    onDismissRequest = { groupMenuExpanded = false }
-                ) {
+                ExposedDropdownMenu(expanded = bgExpanded, onDismissRequest = { bgExpanded = false }) {
                     BloodGroup.values().forEach { bg ->
-                        DropdownMenuItem(
-                            text = { Text(bg.toString()) },
-                            onClick = {
-                                selectedGroup = bg
-                                groupMenuExpanded = false
-                            }
-                        )
+                        DropdownMenuItem(text = { Text(bg.toString()) }, onClick = { group = bg; bgExpanded = false })
                     }
                 }
             }
 
-            OutlinedTextField(
-                value = phone,
-                onValueChange = { v: String -> phone = v },
-                label = { Text("Contact number") },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = KeyboardType.Phone
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Button(
-                onClick = { scope.launch { if (canSubmit()) submit() else snackbarHostState.showSnackbar("Fill required fields.") } },
-                enabled = canSubmit() && !loading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-            ) {
-                if (loading) {
-                    CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text("Posting…")
-                } else {
-                    Text("Post request")
-                }
+            OutlinedButton(onClick = { showDate = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (needed > 0)
+                    "Needed on: ${java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()).format(java.util.Date(needed))}"
+                else "Pick needed date")
             }
+
+            Spacer(Modifier.height(8.dp))
+            Button(
+                enabled = requester.isNotBlank() && phone.isNotBlank() && needed > 0 && !loading,
+                onClick = {
+                    scope.launch {
+                        loading = true
+                        try {
+                            val uid = FirebaseAuth.getInstance().currentUser?.uid
+                            if (uid.isNullOrBlank()) {
+                                snackbar.showSnackbar("You are signed out.")
+                                return@launch
+                            }
+
+                            val payload = mapOf(
+                                "ownerUid" to uid,
+                                "requesterName" to requester.trim(),
+                                "hospitalName" to hospital.trim(),
+                                "locationName" to location.trim(),
+                                "bloodGroup" to group.toString(),
+                                "phone" to phone.trim(),
+                                "neededOnMillis" to needed,
+                                "createdAt" to System.currentTimeMillis()
+                            )
+
+                            val root = FirebaseDatabase.getInstance(SG_DB_URL).reference
+                            // 1) Owner-private copy (edit/delete)
+                            val ownerRef = root.child("requests").child(uid).push()
+                            ownerRef.setValue(payload).await()
+                            val id = ownerRef.key ?: error("no key")
+
+                            // 2) Public feed copy (world-readable)
+                            root.child("requests_public").child(id).setValue(payload).await()
+
+                            snackbar.showSnackbar("Request posted")
+                            onPosted()
+                        } catch (e: Exception) {
+                            snackbar.showSnackbar(e.localizedMessage ?: "Failed to post")
+                        } finally {
+                            loading = false
+                        }
+                    }
+                }
+                ,
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text(if (loading) "Posting…" else "Post request") }
         }
     }
 }

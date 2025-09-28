@@ -22,6 +22,8 @@
         android:theme="@style/Theme.AndroidBloodBank"
         tools:targetApi="31">
 
+
+
         <!-- If you ever call non-HTTPS endpoints during development,
              uncomment this (NOT required for Firebase which is HTTPS):
         android:usesCleartextTraffic="true"

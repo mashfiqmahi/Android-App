@@ -98,6 +98,7 @@ dependencies {
     implementation("com.google.firebase:firebase-auth-ktx:22.3.1")
     implementation("com.google.firebase:firebase-database-ktx:21.0.0") // optional
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    implementation("com.google.firebase:firebase-storage:22.0.0")
 
     // Photo
     implementation("io.coil-kt:coil-compose:2.6.0")

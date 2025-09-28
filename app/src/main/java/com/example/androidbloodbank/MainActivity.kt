@@ -1,8 +1,10 @@
 package com.example.androidbloodbank
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.RequiresApi
 import androidx.navigation.compose.rememberNavController
 import com.example.androidbloodbank.data.LocalRepo
 import com.example.androidbloodbank.navigation.AppNavHost
@@ -13,6 +15,7 @@ class MainActivity : ComponentActivity() {
     // Hold LocalRepo at the Activity level (needs a Context)
     private lateinit var repo: LocalRepo
 
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         repo = LocalRepo(this)

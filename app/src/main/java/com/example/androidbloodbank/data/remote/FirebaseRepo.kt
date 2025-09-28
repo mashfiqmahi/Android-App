@@ -5,128 +5,213 @@ import com.example.androidbloodbank.data.model.BloodRequest
 import com.example.androidbloodbank.data.model.Donor
 import com.example.androidbloodbank.data.model.UserProfile
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.*
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.tasks.await
 
+/**
+ * Failover-aware Firebase repo.
+ * 1) Tries the explicit Singapore RTDB first (DB_URL).
+ * 2) If that fails (rules/region mismatch), falls back to the project's default RTDB.
+ *
+ * This prevents the “data saved to US DB” vs “console open on Singapore DB” mismatch.
+ */
 private const val DB_URL =
     "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
+
 class FirebaseRepo(
-    private val auth: FirebaseAuth = FirebaseAuth.getInstance(),
-    private val db: DatabaseReference = FirebaseDatabase.getInstance(DB_URL).reference
+    private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
-    private fun uid(): String =
-        auth.currentUser?.uid ?: throw IllegalStateException("Not signed in")
+    // Try explicit regional DB first, then default DB from google-services.json
+    private fun dbRefs(): List<DatabaseReference> = listOf(
+        FirebaseDatabase.getInstance(DB_URL).reference,
+        FirebaseDatabase.getInstance().reference
+    )
 
-    // ---- Profile (private under /users/{uid}/profile) ----
-    suspend fun saveProfile(profile: UserProfile) {
+    // ---------- PROFILE ----------
+    suspend fun saveProfile(p: UserProfile) {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
         val data = mapOf(
-            "name" to profile.name,
-            "bloodGroup" to profile.bloodGroup,                // String like "A+"
-            "lastDonationMillis" to profile.lastDonationMillis,
-            "totalDonations" to profile.totalDonations,
-            "contactNumber" to profile.contactNumber,
-            "location" to profile.location,
-            "updatedAt" to ServerValue.TIMESTAMP
+            "name" to p.name,
+            "bloodGroup" to p.bloodGroup,
+            "lastDonationMillis" to (p.lastDonationMillis ?: 0L),
+            "totalDonations" to p.totalDonations,
+            "contactNumber" to p.contactNumber,
+            "location" to p.location
         )
-        db.child("users").child(uid()).child("profile").setValue(data).await()
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                root.child("users").child(uid).child("profile").setValue(data).await()
+                return
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
     }
 
-    suspend fun loadProfile(): UserProfile? {
-        val snap = db.child("users").child(uid()).child("profile").get().await()
-        if (!snap.exists()) return null
-        val name = snap.child("name").getValue(String::class.java) ?: return null
-        val bloodGroup = snap.child("bloodGroup").getValue(String::class.java) ?: ""
-        val lastDonation = snap.child("lastDonationMillis").getValue(Long::class.java)
-        val totalDonations = snap.child("totalDonations").getValue(Int::class.java) ?: 0
-        val contact = snap.child("contactNumber").getValue(String::class.java) ?: ""
-        val location = snap.child("location").getValue(String::class.java) ?: ""
-        return UserProfile(
-            name = name,
-            bloodGroup = bloodGroup,
-            lastDonationMillis = lastDonation,
-            totalDonations = totalDonations,
-            contactNumber = contact,
-            location = location
-        )
-    }
-
-    // ---- Public donor card (readable by all under /donors_public/{uid}) ----
-    suspend fun publishDonorCard(profile: UserProfile) {
-        val public = mapOf(
-            "name" to profile.name,
-            "bloodGroup" to profile.bloodGroup,
-            "phone" to profile.contactNumber,
-            "location" to profile.location,
-            "lastDonationMillis" to profile.lastDonationMillis,
-            "updatedAt" to ServerValue.TIMESTAMP
-        )
-        db.child("donors_public").child(uid()).setValue(public).await()
-    }
-
-    // ---- Blood requests (per-user under /requests/{uid}/{requestId}) ----
-    suspend fun addBloodRequest(req: BloodRequest) {
-        val key = db.child("requests").child(uid()).push().key
-            ?: error("Failed to generate request key")
+    suspend fun publishDonorCard(p: UserProfile) {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
         val data = mapOf(
-            "requesterName" to req.requesterName,
-            "hospitalName" to req.hospitalName,
-            "locationName" to req.locationName,
-            "bloodGroup" to req.bloodGroup.toString(), // "A+", etc.
-            "phone" to req.phone,
-            "neededOnMillis" to req.neededOnMillis,
-            "createdAt" to ServerValue.TIMESTAMP
+            "name" to p.name,
+            "bloodGroup" to p.bloodGroup,
+            "phone" to p.contactNumber,
+            "city" to p.location,
+            "lastDonationMillis" to (p.lastDonationMillis ?: 0L),
+            "updatedAt" to System.currentTimeMillis()
         )
-        db.child("requests").child(uid()).child(key).setValue(data).await()
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                root.child("donors_public").child(uid).setValue(data).await()
+                return
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
     }
 
-    fun observeMyRequests(onChange: (List<BloodRequest>) -> Unit): ValueEventListener {
-        val myUid = runCatching { uid() }.getOrNull() ?: return NoopListener
-        val ref = db.child("requests").child(myUid)
-        val listener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val list = snapshot.children.mapNotNull { s ->
-                    val bgLabel = s.child("bloodGroup").getValue(String::class.java) ?: return@mapNotNull null
-                    val bg = BloodGroup.values().firstOrNull { it.toString() == bgLabel } ?: return@mapNotNull null
-                    BloodRequest(
-                        requesterName = s.child("requesterName").getValue(String::class.java) ?: return@mapNotNull null,
-                        hospitalName = s.child("hospitalName").getValue(String::class.java) ?: "",
-                        locationName = s.child("locationName").getValue(String::class.java) ?: "",
-                        bloodGroup = bg,
-                        phone = s.child("phone").getValue(String::class.java) ?: "",
-                        neededOnMillis = s.child("neededOnMillis").getValue(Long::class.java)
-                            ?: System.currentTimeMillis()
-                    )
+    // ---------- DONORS ----------
+    suspend fun listDonorsByGroup(groupLabel: String): List<Donor> {
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                val snap = root.child("donors_public").get().await()
+                val out = mutableListOf<Donor>()
+                for (child in snap.children) {
+                    val bgStr = child.child("bloodGroup").getValue(String::class.java) ?: ""
+                    if (bgStr == groupLabel) {
+                        out.add(
+                            Donor(
+                                id = child.key.orEmpty(),
+                                name = child.child("name").getValue(String::class.java) ?: "Unknown",
+                                bloodGroup = parseBg(bgStr),
+                                phone = child.child("phone").getValue(String::class.java),
+                                city = child.child("city").getValue(String::class.java),
+                                lastDonationMillis = child.child("lastDonationMillis").getValue(Long::class.java)
+                            )
+                        )
+                    }
                 }
-                onChange(list)
-            }
-            override fun onCancelled(error: DatabaseError) { /* no-op */ }
+                return out
+            } catch (e: Exception) { last = e }
         }
-        ref.addValueEventListener(listener)
-        return listener
+        throw last ?: IllegalStateException("Unknown DB error")
     }
 
-    suspend fun listDonorsByGroup(groupCode: String): List<Donor> {
-        val q = db.child("donors_public").orderByChild("bloodGroup").equalTo(groupCode)
-        val snap = q.get().await()
-        if (!snap.exists()) return emptyList()
-        return snap.children.mapNotNull { s ->
-            val name = s.child("name").getValue(String::class.java) ?: return@mapNotNull null
-            val bgLabel = s.child("bloodGroup").getValue(String::class.java) ?: return@mapNotNull null
-            val bg = BloodGroup.values().firstOrNull { it.toString() == bgLabel } ?: return@mapNotNull null
-            Donor(
-                name = name,
-                bloodGroup = bg,
-                phone = s.child("phone").getValue(String::class.java),
-                city = s.child("location").getValue(String::class.java),
-                lastDonationMillis = s.child("lastDonationMillis").getValue(Long::class.java)
-            )
+    // ---------- REQUESTS: hard-owned under /requests/{uid}/{id} ----------
+    /** Create request and return autoId (writes ownerUid for rules) */
+    suspend fun addBloodRequest(req: BloodRequest): String {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
+        val payload = req.toMap(ownerUid = uid)
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                val ref = root.child("requests").child(uid).push()
+                ref.setValue(payload).await()
+                return ref.key.orEmpty()
+            } catch (e: Exception) { last = e }
         }
+        throw last ?: IllegalStateException("Unknown DB error")
     }
 
-    companion object {
-        private val NoopListener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {}
-            override fun onCancelled(error: DatabaseError) {}
+    /** List ONLY my requests */
+    suspend fun listMyRequests(): List<Pair<String, BloodRequest>> {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                val snap = root.child("requests").child(uid).get().await()
+                return snap.children.mapNotNull { node ->
+                    val id = node.key ?: return@mapNotNull null
+                    id to node.toRequest()
+                }.sortedBy { it.second.neededOnMillis }
+            } catch (e: Exception) { last = e }
         }
+        throw last ?: IllegalStateException("Unknown DB error")
     }
+
+    /** Overwrite existing (no push) */
+    suspend fun updateBloodRequest(id: String, updated: BloodRequest) {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
+        val payload = updated.toMap(ownerUid = uid)
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                root.child("requests").child(uid).child(id).setValue(payload).await()
+                return
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
+    }
+
+    /** Delete existing */
+    suspend fun deleteBloodRequest(id: String) {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                root.child("requests").child(uid).child(id).removeValue().await()
+                return
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
+    }
+
+    /** Remove expired (neededOnMillis < now); returns count removed */
+    suspend fun cleanupExpiredRequests(): Int {
+        val uid = auth.currentUser?.uid ?: return 0
+        val now = System.currentTimeMillis()
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                val userRef = root.child("requests").child(uid)
+                val snap = userRef.get().await()
+                var removed = 0
+                for (c in snap.children) {
+                    val needed = c.child("neededOnMillis").getValue(Long::class.java) ?: 0L
+                    if (needed in 1 until now) {
+                        userRef.child(c.key!!).removeValue().await()
+                        removed++
+                    }
+                }
+                return removed
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
+    }
+}
+
+// ---------- helpers ----------
+private fun parseBg(label: String): BloodGroup = when (label) {
+    "A+" -> BloodGroup.A_POS
+    "A-" -> BloodGroup.A_NEG
+    "B+" -> BloodGroup.B_POS
+    "B-" -> BloodGroup.B_NEG
+    "AB+" -> BloodGroup.AB_POS
+    "AB-" -> BloodGroup.AB_NEG
+    "O-" -> BloodGroup.O_NEG
+    else -> BloodGroup.O_POS
+}
+
+private fun BloodRequest.toMap(ownerUid: String): Map<String, Any?> = mapOf(
+    "ownerUid" to ownerUid,   // <-- REQUIRED by rules
+    "requesterName" to requesterName,
+    "hospitalName" to hospitalName,
+    "locationName" to locationName,
+    "bloodGroup" to bloodGroup.toString(),
+    "phone" to phone,
+    "neededOnMillis" to neededOnMillis,
+    "createdAt" to System.currentTimeMillis()
+)
+
+private fun DataSnapshot.toRequest(): BloodRequest {
+    val groupStr = child("bloodGroup").getValue(String::class.java) ?: "O+"
+    return BloodRequest(
+        requesterName = child("requesterName").getValue(String::class.java) ?: "",
+        hospitalName  = child("hospitalName").getValue(String::class.java) ?: "",
+        locationName  = child("locationName").getValue(String::class.java) ?: "",
+        bloodGroup    = parseBg(groupStr),
+        phone         = child("phone").getValue(String::class.java) ?: "",
+        neededOnMillis= child("neededOnMillis").getValue(Long::class.java) ?: 0L
+    )
 }
