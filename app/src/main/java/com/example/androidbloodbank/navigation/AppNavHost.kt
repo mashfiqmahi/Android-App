@@ -247,13 +247,28 @@ private fun TabsShell(
             /* ---------- DONORS TAB ---------- */
             Tab.DONORS -> stateHolder.SaveableStateProvider("tab_donors") {
                 NavHost(donorsNav, startDestination = Route.FindDonors.path, modifier = Modifier.padding(padding)) {
-                    composable(Route.FindDonors.path) { FindDonorsScreen(repo = repo, onBack = { /* root */ }) }
+                    composable(Route.FindDonors.path) {
+                        FindDonorsScreen(
+                            repo = repo,
+                            onViewDetails = { donorUid -> donorsNav.navigate("donorDetails/$donorUid") },
+                            onBack = { /* root */ }
+                        )
+                    }
                     composable(Route.SelectBloodGroup.path) {
                         SelectBloodGroupScreen(onDone = { donorsNav.popBackStack() }, onBack = { donorsNav.popBackStack() })
                     }
-                    composable(Route.DonorProfile.path) { DonorProfileScreen(repo = repo, onBack = { donorsNav.popBackStack() }) }
+                    // New destination with argument
+                    composable("donorDetails/{uid}") { backStackEntry ->
+                        val uid = backStackEntry.arguments?.getString("uid") ?: return@composable
+                        DonorDetailsScreen(
+                            donorUid = uid,
+                            repo = repo,
+                            onBack = { donorsNav.popBackStack() }
+                        )
+                    }
                 }
             }
+
 
             /* ---------- REQUESTS TAB ---------- */
             Tab.REQUESTS -> stateHolder.SaveableStateProvider("tab_requests") {

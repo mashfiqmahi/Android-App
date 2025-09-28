@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext   // <-- add this
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
@@ -69,14 +70,13 @@ fun DonorDetailsScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseDatabase.getInstance(SG_DB_URL).reference }
+    val context = LocalContext.current        // <-- use this
 
     var details by remember { mutableStateOf<DonorDetails?>(null) }
     var loading by remember { mutableStateOf(true) }
 
     suspend fun load(uid: String): DonorDetails {
-        // Public donor card
         val pub = db.child("donors_public").child(uid).get().await()
-        // Extra profile (optional)
         val prof = db.child("users").child(uid).child("profile").get().await()
 
         val bgRaw = (pub.child("bloodGroup").getValue(String::class.java) ?: "")
@@ -188,7 +188,6 @@ fun DonorDetailsScreen(
                         }
                     }
 
-                    // Eligibility chip
                     val ok = d.eligible
                     AssistChip(
                         onClick = {},
@@ -206,13 +205,13 @@ fun DonorDetailsScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // Quick actions
+            // Quick actions (use LocalContext instead of 'it')
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FilledTonalButton(
                     onClick = {
                         if (d.phone.isNotBlank()) {
                             val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(d.phone)}"))
-                            it.context.startActivity(intent)
+                            context.startActivity(intent)    // <-- fixed
                         } else {
                             scope.launch { snackbar.showSnackbar("No phone number") }
                         }
@@ -224,7 +223,7 @@ fun DonorDetailsScreen(
                     onClick = {
                         if (d.phone.isNotBlank()) {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("sms:${Uri.encode(d.phone)}"))
-                            it.context.startActivity(intent)
+                            context.startActivity(intent)    // <-- fixed
                         } else {
                             scope.launch { snackbar.showSnackbar("No phone number") }
                         }
@@ -235,7 +234,6 @@ fun DonorDetailsScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // Info cards
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 InfoRow(Icons.Outlined.Bloodtype, "Blood group", d.bloodGroup)
                 InfoRow(Icons.Outlined.Event, "Last donation", formatDate(d.lastDonationMillis) +

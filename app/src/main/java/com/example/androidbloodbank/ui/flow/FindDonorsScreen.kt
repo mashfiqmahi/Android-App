@@ -33,6 +33,7 @@ private const val ELIGIBLE_AFTER_DAYS = 90
 @Composable
 fun FindDonorsScreen(
     repo: LocalRepo,
+    onViewDetails: (String) -> Unit,
     onBack: () -> Unit
 ) {
     val snackbar = remember { SnackbarHostState() }
@@ -126,7 +127,14 @@ fun FindDonorsScreen(
                         DonorCard(
                             donor = donor,
                             onViewDetails = {
-                                scope.launch { snackbar.showSnackbar("Details coming soon") }
+                                // ✅ Navigate using the donor UID (change to donor.id if your model uses 'id')
+                                val uid = donor.id
+                                if (!uid.isNullOrBlank()) {
+                                    onViewDetails(uid)
+                                } else {
+                                    // graceful fallback if uid missing
+                                    scope.launch { snackbar.showSnackbar("Missing donor id") }
+                                }
                             },
                             onCall = { number: String ->
                                 val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
@@ -147,7 +155,6 @@ private fun DonorCard(
     onCall: (String) -> Unit
 ) {
     val surface = MaterialTheme.colorScheme.surface
-    val container = MaterialTheme.colorScheme.surfaceVariant
 
     // Derived info
     val daysSince = donor.lastDonationMillis?.let { ts ->
@@ -162,15 +169,14 @@ private fun DonorCard(
     val phone = donor.phone.orEmpty()
     val canCall = phone.isNotBlank()
 
-    // Use an OutlinedCard with ROUND corners and generous inner padding
     OutlinedCard(
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 4.dp), // breathing room from screen edges
+            .padding(horizontal = 4.dp),
         colors = CardDefaults.outlinedCardColors(containerColor = surface)
     ) {
-        Column(Modifier.padding(18.dp)) { // generous inner padding so border isn't tight
+        Column(Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Left: Name + Eligibility (horizontal)
                 Column(modifier = Modifier.weight(1f)) {
@@ -199,7 +205,7 @@ private fun DonorCard(
                     }
                 }
 
-                // Right: Bold blood group with comfy space from border
+                // Right: Bold blood group
                 Text(
                     donor.bloodGroup.toString(),
                     style = MaterialTheme.typography.headlineSmall,
@@ -210,11 +216,9 @@ private fun DonorCard(
 
             Spacer(Modifier.height(16.dp))
 
-            // Buttons row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
-
             ) {
                 OutlinedButton(
                     onClick = onViewDetails,
@@ -228,10 +232,10 @@ private fun DonorCard(
                     enabled = canCall,
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(14.dp),
-
                 ) {
                     Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
-
+                    Spacer(Modifier.width(8.dp))
+                    Text("Call")
                 }
             }
         }
