@@ -1,4 +1,4 @@
-package com.example.androidbloodbank.ui
+package com.example.androidbloodbank.ui.theme
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -18,7 +18,17 @@ import com.example.androidbloodbank.data.model.Donor
 
 @Composable
 fun EmergencyScreen(repo: LocalRepo, onBack: () -> Unit) {
-    val donors = remember { repo.loadDonors() }
+    val donors = remember {
+        val users = repo.loadUsers()
+        // Map each user to your existing Donor UI model (phone/flags left null/false)
+        users.map { u ->
+            Donor(
+                name = u.name,
+                bloodGroup = u.bloodGroup
+                // phone = null, verified = false, etc. (defaults are fine)
+            )
+        }
+    }
     val priority = donors.sortedWith(compareByDescending<Donor> { it.verified }.thenBy { it.bloodGroup.label })
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {

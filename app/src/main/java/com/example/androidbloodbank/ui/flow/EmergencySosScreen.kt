@@ -30,7 +30,17 @@ fun EmergencySosScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val donors = remember { repo.loadDonors() } // predefined offline list from LocalRepo
+    val donors = remember {
+        val users = repo.loadUsers()
+        // Map each user to your existing Donor UI model (phone/flags left null/false)
+        users.map { u ->
+            Donor(
+                name = u.name,
+                bloodGroup = u.bloodGroup
+                // phone = null, verified = false, etc. (defaults are fine)
+            )
+        }
+    }
 
     Scaffold(
         topBar = {
