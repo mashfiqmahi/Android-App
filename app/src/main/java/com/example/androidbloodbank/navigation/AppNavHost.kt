@@ -31,6 +31,7 @@ import com.example.androidbloodbank.ui.screens.ProfileScreen
 import com.example.androidbloodbank.ui.screens.RequestBloodScreen
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.navigation.compose.currentBackStackEntryAsState
 
 private const val TabsRoute = "tabs_shell"
 
@@ -43,6 +44,24 @@ fun AppNavHost(
     onAlert: (String) -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+
+
+    // show bottom bar on main app sections only
+    val backStack by navController.currentBackStackEntryAsState()
+    val route = backStack?.destination?.route
+    val showBottomBar = when {
+        route == null -> false
+        route.startsWith(Route.Splash.path) -> false
+        route.startsWith(Route.Gate.path)   -> false
+        route.startsWith(Route.SignIn.path) -> false
+        route.startsWith(Route.SignUp.path) -> false
+
+        // HIDE the bottom menu in Emergency mode:
+        route.startsWith(Route.EmergencySOS.path) -> false
+        // (Optional: legacy/emulator routes—keep hidden if they exist)
+        route.startsWith("emergency")            -> false
+        else -> true
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
@@ -247,28 +266,18 @@ private fun TabsShell(
             /* ---------- DONORS TAB ---------- */
             Tab.DONORS -> stateHolder.SaveableStateProvider("tab_donors") {
                 NavHost(donorsNav, startDestination = Route.FindDonors.path, modifier = Modifier.padding(padding)) {
-                    composable(Route.FindDonors.path) {
-                        FindDonorsScreen(
-                            repo = repo,
-                            onViewDetails = { donorUid -> donorsNav.navigate("donorDetails/$donorUid") },
-                            onBack = { /* root */ }
-                        )
+                    composable(Route.FindDonors.path) { FindDonorsScreen(repo = repo, onBack = { /* root */ },
+                        onViewDetails = { donorId: String ->
+                            donorsNav.navigate("${Route.DonorProfile.path}/$donorId")
+                        }
+                    )
                     }
                     composable(Route.SelectBloodGroup.path) {
                         SelectBloodGroupScreen(onDone = { donorsNav.popBackStack() }, onBack = { donorsNav.popBackStack() })
                     }
-                    // New destination with argument
-                    composable("donorDetails/{uid}") { backStackEntry ->
-                        val uid = backStackEntry.arguments?.getString("uid") ?: return@composable
-                        DonorDetailsScreen(
-                            donorUid = uid,
-                            repo = repo,
-                            onBack = { donorsNav.popBackStack() }
-                        )
-                    }
+                    composable(Route.DonorProfile.path) { DonorProfileScreen(repo = repo, onBack = { donorsNav.popBackStack() }) }
                 }
             }
-
 
             /* ---------- REQUESTS TAB ---------- */
             Tab.REQUESTS -> stateHolder.SaveableStateProvider("tab_requests") {
