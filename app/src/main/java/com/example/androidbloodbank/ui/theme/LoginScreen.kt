@@ -1,6 +1,7 @@
 package com.example.androidbloodbank.ui
 
 import android.util.Patterns
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -14,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
 import com.google.firebase.auth.FirebaseAuth
@@ -26,7 +28,8 @@ import kotlinx.coroutines.tasks.await
 fun LoginScreen(
     repo: LocalRepo,
     onBack: () -> Unit,
-    onLoginSuccess: () -> Unit
+    onLoginSuccess: () -> Unit,
+    onForgotPassword: () -> Unit = {}
 ) {
     val auth = remember { FirebaseAuth.getInstance() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -101,6 +104,17 @@ fun LoginScreen(
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = "Forgot password?",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onForgotPassword() }
+                    .padding(vertical = 8.dp),
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.primary
             )
 
             Spacer(Modifier.height(8.dp))

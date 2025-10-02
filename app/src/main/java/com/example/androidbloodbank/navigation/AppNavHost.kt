@@ -21,7 +21,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.androidbloodbank.data.LocalRepo
-import com.example.androidbloodbank.ui.EmergencyScreen
+import com.example.androidbloodbank.ui.theme.EmergencyScreen
 import com.example.androidbloodbank.ui.LoginScreen
 import com.example.androidbloodbank.ui.SignupScreen
 import com.example.androidbloodbank.ui.SchedulesScreen
@@ -32,6 +32,7 @@ import com.example.androidbloodbank.ui.screens.RequestBloodScreen
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.example.androidbloodbank.ui.screens.ForgotPasswordScreen
 
 private const val TabsRoute = "tabs_shell"
 
@@ -114,9 +115,24 @@ fun AppNavHost(
                             popUpTo(Route.Gate.path) { inclusive = true }
                             launchSingleTop = true
                         }
+                    },
+                    onForgotPassword = {
+                        navController.navigate(Route.ForgotPassword.path)
                     }
                 )
             }
+
+            composable(Route.ForgotPassword.path) {
+                ForgotPasswordScreen(
+                    onBack = { navController.popBackStack() },
+                    onSent = { email ->
+                        // Optional: show a snackbar/toast via your onAlert callback
+                        onAlert("Reset link sent to $email")
+                        navController.popBackStack() // return to Login
+                    }
+                )
+            }
+
 
             composable(Route.SignUp.path) {
                 SignupScreen(

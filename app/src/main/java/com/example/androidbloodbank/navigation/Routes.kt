@@ -9,6 +9,9 @@ sealed class Route(val path: String) {
     data object SignIn : Route("signin")
     data object SignUp : Route("signup")
 
+    // Forget Pass
+    object ForgotPassword : Route("forgot_password")
+
     // Main
     data object Home   : Route("home")
 
