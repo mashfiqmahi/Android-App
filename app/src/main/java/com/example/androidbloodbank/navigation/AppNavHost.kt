@@ -32,6 +32,7 @@ import com.example.androidbloodbank.ui.screens.RequestBloodScreen
 import com.google.firebase.auth.FirebaseAuth
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.example.androidbloodbank.data.remote.FirebaseRepo
 import com.example.androidbloodbank.ui.screens.ForgotPasswordScreen
 
 private const val TabsRoute = "tabs_shell"
@@ -299,6 +300,11 @@ private fun TabsShell(
             Tab.REQUESTS -> stateHolder.SaveableStateProvider("tab_requests") {
                 NavHost(requestsNav, startDestination = Route.RequestBlood.path, modifier = Modifier.padding(padding)) {
                     composable(Route.RequestBlood.path) {
+                        // 🔹 Auto-cleanup this user's expired requests (private + public mirror)
+                        LaunchedEffect(Unit) {
+                            runCatching { FirebaseRepo().cleanupExpiredRequestsForCurrentUser() }
+                        }
+
                         RequestsFeedScreen(
                             repo = repo,
                             onBack = { /* root */ },
@@ -315,6 +321,7 @@ private fun TabsShell(
                     composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { requestsNav.popBackStack() }) }
                 }
             }
+
 
             /* ---------- BANK TAB ---------- */
             Tab.BANK -> stateHolder.SaveableStateProvider("tab_bank") {

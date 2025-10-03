@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
 import com.example.androidbloodbank.data.model.Donor
+import com.example.androidbloodbank.data.remote.FirebaseRepo
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,16 +32,36 @@ fun EmergencySosScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val donors = remember {
-        val users = repo.loadUsers()
-        // Map each user to your existing Donor UI model (phone/flags left null/false)
-        users.map { u ->
-            Donor(
-                name = u.name,
-                bloodGroup = u.bloodGroup
-                // phone = null, verified = false, etc. (defaults are fine)
-            )
-        }
+    val scope = rememberCoroutineScope()
+    // show seeded donors instantly, then refresh from public node
+    var donors by remember { mutableStateOf<List<Donor>>(repo.loadDonors()) }
+
+    LaunchedEffect(Unit) {
+        runCatching { FirebaseRepo().listAllDonorsPublic() }
+            .onSuccess { if (it.isNotEmpty()) donors = it }
+            .onFailure {
+                // optional local users fallback
+                val users = repo.loadUsers()
+                if (users.isNotEmpty()) {
+                    donors = users.map { u -> Donor(name = u.name, bloodGroup = u.bloodGroup) }
+                }
+            }
+    }
+
+    var loaded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        runCatching { FirebaseRepo().listAllUsers() }
+            .onSuccess { remote ->
+                if (remote.isNotEmpty()) donors = remote
+            }
+            .onFailure {
+                // keep current list (seeded or local users)
+                val users = repo.loadUsers()
+                if (users.isNotEmpty()) {
+                    donors = users.map { u -> Donor(name = u.name, bloodGroup = u.bloodGroup) }
+                }
+            }
     }
 
     Scaffold(

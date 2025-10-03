@@ -9,6 +9,7 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.tasks.await
+import com.google.firebase.auth.AuthResult
 
 /**
  * Failover-aware Firebase repo.
@@ -23,6 +24,15 @@ private const val DB_URL =
 class FirebaseRepo(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
+    // Ensure we have an authenticated session (anonymous is fine for read rules)
+    private suspend fun ensureAuth() {
+        if (auth.currentUser == null) {
+            auth.signInAnonymously().await()
+        }
+    }
+
+
+
     // Try explicit regional DB first, then default DB from google-services.json
     private fun dbRefs(): List<DatabaseReference> = listOf(
         FirebaseDatabase.getInstance(DB_URL).reference,
@@ -97,6 +107,91 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
+
+    // List ALL users (reads users/{uid}/profile) and maps to Donor UI model
+    // List ALL users as Donor models from users/*/profile.
+// Tries users first; if empty, falls back to donors_public.
+    suspend fun listAllUsers(): List<Donor> {
+        ensureAuth() // <-- important for rules requiring auth
+
+        // Try users/*/profile
+        run {
+            var last: Exception? = null
+            for (root in dbRefs()) {
+                try {
+                    val snap = root.child("users").get().await()
+                    val out = mutableListOf<Donor>()
+                    for (userNode in snap.children) {
+                        val prof = userNode.child("profile")
+                        if (!prof.exists()) continue
+
+                        val name  = prof.child("name").getValue(String::class.java) ?: "User"
+                        val bgStr = prof.child("bloodGroup").getValue(String::class.java) ?: ""
+
+                        val phone = prof.child("phone").getValue(String::class.java)
+                            ?: prof.child("contactNumber").getValue(String::class.java)
+
+                        val city  = prof.child("city").getValue(String::class.java)
+                            ?: prof.child("location").getValue(String::class.java)
+
+                        val hospital = prof.child("hospital").getValue(String::class.java)
+                            ?: prof.child("hospitalName").getValue(String::class.java)
+
+                        val lastDonation = prof.child("lastDonationMillis").getValue(Long::class.java)
+                        val verified = prof.child("verified").getValue(Boolean::class.java) ?: false
+
+                        out.add(
+                            Donor(
+                                id = userNode.key.orEmpty(),
+                                name = name,
+                                bloodGroup = parseBgFlexible(bgStr),
+                                phone = phone,
+                                city = city,
+                                hospital = hospital,
+                                lastDonationMillis = lastDonation,
+                                verified = verified
+                            )
+                        )
+                    }
+                    if (out.isNotEmpty()) return out
+                    // else fall through to donors_public
+                } catch (e: Exception) { last = e }
+            }
+            // ignore last; attempt donors_public next
+        }
+
+        // Fallback: donors_public/*
+        return listAllDonorsPublic()
+    }
+
+
+    // Public donors: donors_public/*  (no group filter)
+    suspend fun listAllDonorsPublic(): List<Donor> {
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                val snap = root.child("donors_public").get().await()
+                val out = mutableListOf<Donor>()
+                for (child in snap.children) {
+                    val bgStr = child.child("bloodGroup").getValue(String::class.java) ?: ""
+                    out.add(
+                        Donor(
+                            id = child.key.orEmpty(),
+                            name = child.child("name").getValue(String::class.java) ?: "Unknown",
+                            bloodGroup = parseBgFlexible(bgStr),
+                            phone = child.child("phone").getValue(String::class.java),
+                            city = child.child("city").getValue(String::class.java),
+                            lastDonationMillis = child.child("lastDonationMillis").getValue(Long::class.java)
+                        )
+                    )
+                }
+                return out
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
+    }
+
+
 
     // ---------- REQUESTS: hard-owned under /requests/{uid}/{id} ----------
     /** Create request and return autoId (writes ownerUid for rules) */
@@ -179,19 +274,101 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
+
+    suspend fun listActivePublicRequests(nowMs: Long = System.currentTimeMillis())
+            : List<Pair<String, BloodRequest>> {
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                val snap = root.child("requests_public")
+                    .orderByChild("neededOnMillis")
+                    .startAt(nowMs.toDouble())        // RTDB range uses Double
+                    .get()
+                    .await()
+
+                return snap.children.mapNotNull { c ->
+                    val id = c.key ?: return@mapNotNull null
+                    id to DataSnapshotToRequestPublic(c)
+                }.sortedBy { it.second.neededOnMillis }
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
+    }
+
+    // helper to read what you write in PostRequestScreen
+    private fun DataSnapshotToRequestPublic(c: com.google.firebase.database.DataSnapshot): BloodRequest {
+        val groupStr = c.child("bloodGroup").getValue(String::class.java) ?: "O+"
+        return BloodRequest(
+            requesterName   = c.child("requesterName").getValue(String::class.java) ?: "",
+            hospitalName    = c.child("hospitalName").getValue(String::class.java) ?: "",
+            locationName    = c.child("locationName").getValue(String::class.java) ?: "",
+            bloodGroup      = parseBgFlexible(groupStr),
+            phone           = c.child("phone").getValue(String::class.java) ?: "",
+            neededOnMillis  = c.child("neededOnMillis").getValue(Long::class.java) ?: 0L
+        )
+    }
+
+    // Automatic delte expired requests of current user when user sign in
+    suspend fun cleanupExpiredRequestsForCurrentUser(): Int {
+        val uid = auth.currentUser?.uid ?: return 0
+        val now = System.currentTimeMillis()
+        var removed = 0
+        var last: Exception? = null
+
+        for (root in dbRefs()) {
+            try {
+                val userRef = root.child("requests").child(uid)
+                val snap = userRef.get().await()
+                for (c in snap.children) {
+                    val needed = c.child("neededOnMillis").getValue(Long::class.java) ?: 0L
+                    if (needed in 1 until now) {
+                        val id = c.key ?: continue
+                        userRef.child(id).removeValue().await()
+                        root.child("requests_public").child(id).removeValue().await()
+                        removed++
+                    }
+                }
+                return removed
+            } catch (e: Exception) { last = e }
+        }
+        if (last != null) throw last
+        return removed
+    }
+
 }
 
 // ---------- helpers ----------
-private fun parseBg(label: String): BloodGroup = when (label) {
-    "A+" -> BloodGroup.A_POS
-    "A-" -> BloodGroup.A_NEG
-    "B+" -> BloodGroup.B_POS
-    "B-" -> BloodGroup.B_NEG
-    "AB+" -> BloodGroup.AB_POS
-    "AB-" -> BloodGroup.AB_NEG
-    "O-" -> BloodGroup.O_NEG
-    else -> BloodGroup.O_POS
+private fun parseBgFlexible(raw: String): BloodGroup {
+    val s = raw.trim().uppercase()
+
+    // Common label forms
+    when (s) {
+        "A+" -> return BloodGroup.A_POS
+        "A-" -> return BloodGroup.A_NEG
+        "B+" -> return BloodGroup.B_POS
+        "B-" -> return BloodGroup.B_NEG
+        "AB+" -> return BloodGroup.AB_POS
+        "AB-" -> return BloodGroup.AB_NEG
+        "O+" -> return BloodGroup.O_POS
+        "O-" -> return BloodGroup.O_NEG
+    }
+
+    // Enum-like forms (what saveProfile might have written)
+    return when (s) {
+        "A_POS", "A POS", "A_POSITIVE" -> BloodGroup.A_POS
+        "A_NEG", "A NEG", "A_NEGATIVE" -> BloodGroup.A_NEG
+        "B_POS", "B POS", "B_POSITIVE" -> BloodGroup.B_POS
+        "B_NEG", "B NEG", "B_NEGATIVE" -> BloodGroup.B_NEG
+        "AB_POS","AB POS","AB_POSITIVE"-> BloodGroup.AB_POS
+        "AB_NEG","AB NEG","AB_NEGATIVE"-> BloodGroup.AB_NEG
+        "O_POS", "O POS", "O_POSITIVE" -> BloodGroup.O_POS
+        "O_NEG", "O NEG", "O_NEGATIVE" -> BloodGroup.O_NEG
+        else -> BloodGroup.O_POS
+    }
 }
+// Back-compat shim for older call sites
+private fun parseBg(label: String): BloodGroup = parseBgFlexible(label)
+
 
 private fun BloodRequest.toMap(ownerUid: String): Map<String, Any?> = mapOf(
     "ownerUid" to ownerUid,   // <-- REQUIRED by rules

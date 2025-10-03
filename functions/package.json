@@ -1,0 +1,11 @@
+{
+  "name": "androidbloodbank-functions",
+  "engines": { "node": "18" },
+  "scripts": {
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.5.0",
+    "firebase-functions": "^6.1.1"
+  }
+}

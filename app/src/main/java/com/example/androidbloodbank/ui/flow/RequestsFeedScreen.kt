@@ -53,6 +53,10 @@ fun RequestsFeedScreen(
     // ← THIS is the correct way: call composable directly (no extra remember block)
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    // For deleting expired requests
+    var items by remember { mutableStateOf<List<Pair<String, BloodRequest>>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+
     suspend fun fetchAll() {
         val snap = db.child("requests_public").get().await()
         all = snap.children.map { s ->
@@ -79,6 +83,13 @@ fun RequestsFeedScreen(
     }
 
     LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(Unit) {
+        loading = true
+        runCatching { com.example.androidbloodbank.data.remote.FirebaseRepo().listActivePublicRequests() }
+            .onSuccess { items = it }
+            .onFailure { error = it.localizedMessage ?: "Failed to load" }
+        loading = false
+    }
 
     val filtered by remember(all, query, groupFilter) {
         derivedStateOf {
