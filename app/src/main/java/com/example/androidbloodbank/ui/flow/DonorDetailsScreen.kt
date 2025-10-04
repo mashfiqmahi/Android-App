@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext   // <-- add this
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -76,30 +77,68 @@ fun DonorDetailsScreen(
     var loading by remember { mutableStateOf(true) }
 
     suspend fun load(uid: String): DonorDetails {
-        val pub = db.child("donors_public").child(uid).get().await()
-        val prof = db.child("users").child(uid).child("profile").get().await()
+        // Ensure we have an auth session (anonymous is fine for public reads)
+        val auth = FirebaseAuth.getInstance()
+        if (auth.currentUser == null) {
+            runCatching { auth.signInAnonymously().await() }
+        }
 
-        val bgRaw = (pub.child("bloodGroup").getValue(String::class.java) ?: "")
+        // 1) Public donor card (allowed by rules)
+        val pub = db.child("donors_public").child(uid).get().await()
+
+        // If there is no public donor record at all, return minimal info
+        if (!pub.exists()) {
+            return DonorDetails(uid = uid)
+        }
+
+        val bgRaw = pub.child("bloodGroup").getValue(String::class.java) ?: ""
         val bg = if (bgRaw.contains("+") || bgRaw.contains("-")) bgRaw else codeToLabel(bgRaw)
 
         val last = pub.child("lastDonationMillis").getValue(Long::class.java) ?: 0L
         val elig = pub.child("eligible").getValue(Boolean::class.java)
             ?: (daysSince(last)?.let { it >= 120 } ?: true)
 
+        // Prefer public fields
+        var email: String = pub.child("email").getValue(String::class.java) ?: ""
+        val name = pub.child("name").getValue(String::class.java) ?: ""
+        val phone = pub.child("phone").getValue(String::class.java) ?: ""
+        val city = pub.child("city").getValue(String::class.java) ?: ""
+
+        // Private profile only for the owner (per rules)
+        var gender: String = ""
+        var age: Int = 0
+        var address: String = ""
+
+        if (auth.currentUser?.uid == uid) {
+            runCatching {
+                val prof = db.child("users").child(uid).child("profile").get().await()
+                if (email.isBlank()) {
+                    // fallback to private email if public one missing
+                    email = prof.child("email").getValue(String::class.java) ?: (auth.currentUser?.email ?: "")
+                }
+                gender = prof.child("gender").getValue(String::class.java) ?: ""
+                age = prof.child("age").getValue(Int::class.java)
+                    ?: (prof.child("age").getValue(Long::class.java)?.toInt() ?: 0)
+                address = prof.child("address").getValue(String::class.java) ?: ""
+            }
+        }
+
         return DonorDetails(
             uid = uid,
-            name = pub.child("name").getValue(String::class.java) ?: prof.child("name").getValue(String::class.java) ?: "",
+            name = name,
             bloodGroup = bg,
-            phone = pub.child("phone").getValue(String::class.java) ?: prof.child("phone").getValue(String::class.java) ?: "",
-            email = prof.child("email").getValue(String::class.java) ?: "",
-            location = pub.child("locationName").getValue(String::class.java) ?: prof.child("address").getValue(String::class.java) ?: "",
+            phone = phone,
+            email = email,
+            location = city,
             lastDonationMillis = last,
             eligible = elig,
-            gender = prof.child("gender").getValue(String::class.java) ?: "",
-            age = prof.child("age").getValue(Int::class.java) ?: (prof.child("age").getValue(Long::class.java)?.toInt() ?: 0),
-            address = prof.child("address").getValue(String::class.java) ?: ""
+            gender = gender,
+            age = age,
+            address = address
         )
     }
+
+
 
     LaunchedEffect(donorUid) {
         loading = true
@@ -243,7 +282,6 @@ fun DonorDetailsScreen(
                 if (d.gender.isNotBlank()) InfoRow(Icons.Outlined.Wc, "Gender", d.gender)
                 if (d.age > 0) InfoRow(Icons.Outlined.Cake, "Age", d.age.toString())
                 if (d.address.isNotBlank()) InfoRow(Icons.Outlined.Home, "Address", d.address)
-                InfoRow(Icons.Outlined.Badge, "UID", d.uid)
                 Spacer(Modifier.height(24.dp))
             }
         }

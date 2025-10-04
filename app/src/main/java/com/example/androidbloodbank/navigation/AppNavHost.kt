@@ -34,6 +34,8 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.androidbloodbank.data.remote.FirebaseRepo
 import com.example.androidbloodbank.ui.screens.ForgotPasswordScreen
+import androidx.navigation.NavType
+
 
 private const val TabsRoute = "tabs_shell"
 
@@ -282,19 +284,48 @@ private fun TabsShell(
 
             /* ---------- DONORS TAB ---------- */
             Tab.DONORS -> stateHolder.SaveableStateProvider("tab_donors") {
-                NavHost(donorsNav, startDestination = Route.FindDonors.path, modifier = Modifier.padding(padding)) {
-                    composable(Route.FindDonors.path) { FindDonorsScreen(repo = repo, onBack = { /* root */ },
-                        onViewDetails = { donorId: String ->
-                            donorsNav.navigate("${Route.DonorProfile.path}/$donorId")
-                        }
-                    )
+                NavHost(
+                    navController = donorsNav,
+                    startDestination = Route.FindDonors.path,
+                    modifier = Modifier.padding(padding)
+                ) {
+                    composable(Route.FindDonors.path) {
+                        val userDistrict: String? = null
+
+                        FindDonorsScreen(
+                            repo = repo,
+                            onBack = { /* root */ },
+                            onViewDetails = { donorId: String ->
+                                // Navigate to donor_profile/<id>
+                                donorsNav.navigate("${Route.DonorProfile.path}/$donorId")
+                            }
+                            // defaultDistrict = userDistrict
+                        )
                     }
+
                     composable(Route.SelectBloodGroup.path) {
-                        SelectBloodGroupScreen(onDone = { donorsNav.popBackStack() }, onBack = { donorsNav.popBackStack() })
+                        SelectBloodGroupScreen(
+                            onDone = { donorsNav.popBackStack() },
+                            onBack = { donorsNav.popBackStack() }
+                        )
                     }
-                    composable(Route.DonorProfile.path) { DonorProfileScreen(repo = repo, onBack = { donorsNav.popBackStack() }) }
+
+                    // IMPORTANT: declare a route pattern that accepts {donorId}
+                    composable(
+                        route = "${Route.DonorProfile.path}/{donorId}",
+                        arguments = listOf(navArgument("donorId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val donorId = backStackEntry.arguments?.getString("donorId").orEmpty()
+                        DonorDetailsScreen(
+                            donorUid = donorId,
+                            repo = repo,
+                            onBack = { donorsNav.popBackStack() }
+                        )
+                    }
                 }
             }
+
+
 
             /* ---------- REQUESTS TAB ---------- */
             Tab.REQUESTS -> stateHolder.SaveableStateProvider("tab_requests") {

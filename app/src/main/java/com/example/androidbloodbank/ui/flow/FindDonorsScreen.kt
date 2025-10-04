@@ -1,8 +1,6 @@
 package com.example.androidbloodbank.ui.flow
-
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Phone
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -25,17 +24,31 @@ import com.example.androidbloodbank.data.remote.FirebaseRepo
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.material.icons.outlined.Phone
-
+import androidx.navigation.navArgument
 private const val ELIGIBLE_AFTER_DAYS = 90
+
+// Static district list (exact spellings you gave)
+private val BD_DISTRICTS = listOf(
+    "Dhaka","Faridpur","Gazipur","Gopalganj","Jamalpur","Kishoreganj","Madaripur",
+    "Manikganj","Munshiganj","Mymensingh","Narayanganj","Narsingdi","Netrokona",
+    "Rajbari","Shariatpur","Sherpur","Tangail","Bogra","Joypurhat","Naogaon",
+    "Natore","Nawabganj","Pabna","Rajshahi","Sirajgonj","Dinajpur","Gaibandha",
+    "Kurigram","Lalmonirhat","Nilphamari","Panchagarh","Rangpur","Thakurgaon",
+    "Barguna","Barisal","Bhola","Jhalokati","Patuakhali","Pirojpur","Bandarban",
+    "Brahmanbaria","Chandpur","Chittagong","Comilla","Cox's Bazar","Feni",
+    "Khagrachari","Lakshmipur","Noakhali","Rangamati","Habiganj","Maulvibazar",
+    "Sunamganj","Sylhet","Bagerhat","Chuadanga","Jessore","Jhenaidah","Khulna",
+    "Kushtia","Magura","Meherpur","Narail","Satkhira"
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FindDonorsScreen(
     repo: LocalRepo,
+    onBack: () -> Unit,
     onViewDetails: (String) -> Unit,
-    onBack: () -> Unit
 ) {
+    // ---- state / deps ----
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val firebase = remember { FirebaseRepo() }
@@ -45,18 +58,20 @@ fun FindDonorsScreen(
     var donors by remember { mutableStateOf<List<Donor>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
 
-    // fetch donors when group changes
-    LaunchedEffect(selectedGroup) {
-        val group = selectedGroup ?: return@LaunchedEffect
+    // District filter UI
+    var district by remember { mutableStateOf<String?>(null) }
+    var expandDistrict by remember { mutableStateOf(false) }
+
+    // Load donors when blood group OR district changes
+    LaunchedEffect(selectedGroup, district) {
+        val bg = selectedGroup ?: return@LaunchedEffect
         loading = true
         try {
-            donors = firebase.listDonorsByGroup(group.toString())
+            donors = firebase.listDonorsByGroup(bg.toString(), district)
         } catch (e: Exception) {
-            snackbar.showSnackbar(e.localizedMessage ?: "Failed to load donors.")
+            scope.launch { snackbar.showSnackbar(e.localizedMessage ?: "Failed to load donors") }
             donors = emptyList()
-        } finally {
-            loading = false
-        }
+        } finally { loading = false }
     }
 
     Scaffold(
@@ -79,22 +94,19 @@ fun FindDonorsScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // --- Blood group selector (chips) ---
+            // Blood group chips
             Text("Select your blood group", style = MaterialTheme.typography.titleMedium)
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
-                val groups = listOf(
+                listOf(
                     BloodGroup.A_POS, BloodGroup.A_NEG,
                     BloodGroup.B_POS, BloodGroup.B_NEG,
                     BloodGroup.O_POS, BloodGroup.O_NEG,
                     BloodGroup.AB_POS, BloodGroup.AB_NEG
-                )
-                groups.forEach { bg ->
+                ).forEach { bg ->
                     FilterChip(
                         selected = selectedGroup == bg,
                         onClick = { selectedGroup = bg },
@@ -103,40 +115,71 @@ fun FindDonorsScreen(
                 }
             }
 
-            Text("Results", style = MaterialTheme.typography.titleMedium)
+            // District dropdown (simple + always visible; enabled after BG chosen)
+            Text("Filter by district", style = MaterialTheme.typography.titleMedium)
+            ExposedDropdownMenuBox(
+                expanded = expandDistrict,
+                onExpandedChange = {
+                    if (selectedGroup != null) expandDistrict = !expandDistrict
+                }
+            ) {
+                OutlinedTextField(
+                    modifier = Modifier
+                        .menuAnchor()
+                        .fillMaxWidth(),
+                    value = district ?: "All districts",
+                    onValueChange = {},
+                    readOnly = true,
+                    enabled = selectedGroup != null,
+                    label = { Text("District") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandDistrict) }
+                )
+                ExposedDropdownMenu(
+                    expanded = expandDistrict,
+                    onDismissRequest = { expandDistrict = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("All districts") },
+                        onClick = {
+                            district = null
+                            expandDistrict = false
+                        }
+                    )
+                    BD_DISTRICTS.forEach { d ->
+                        DropdownMenuItem(
+                            text = { Text(d) },
+                            onClick = {
+                                district = d
+                                expandDistrict = false
+                            }
+                        )
+                    }
+                }
+            }
 
-            if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Results", style = MaterialTheme.typography.titleMedium)
+            when {
+                loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
                 }
-            } else if (selectedGroup == null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                selectedGroup == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("Select a blood group to search.")
                 }
-            } else if (donors.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No donors found for ${selectedGroup.toString()}.")
+                donors.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    val g = selectedGroup.toString()
+                    val d = district ?: "all districts"
+                    Text("No donors found for $g in $d.")
                 }
-            } else {
-                LazyColumn(
+                else -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     contentPadding = PaddingValues(bottom = 24.dp)
                 ) {
-                    items(items = donors, key = { it.hashCode() }) { donor: Donor ->
+                    items(items = donors, key = { it.id }) { donor ->
                         DonorCard(
                             donor = donor,
-                            onViewDetails = {
-                                // ✅ Navigate using the donor UID (change to donor.id if your model uses 'id')
-                                val uid = donor.id
-                                if (!uid.isNullOrBlank()) {
-                                    onViewDetails(uid)
-                                } else {
-                                    // graceful fallback if uid missing
-                                    scope.launch { snackbar.showSnackbar("Missing donor id") }
-                                }
-                            },
-                            onCall = { number: String ->
+                            onViewDetails = { onViewDetails(donor.id) },  // <-- keep this
+                            onCall = { number ->
                                 val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number"))
                                 ctx.startActivity(intent)
                             }
@@ -154,58 +197,35 @@ private fun DonorCard(
     onViewDetails: () -> Unit,
     onCall: (String) -> Unit
 ) {
-    val surface = MaterialTheme.colorScheme.surface
-
-    // Derived info
     val daysSince = donor.lastDonationMillis?.let { ts ->
-        if (ts > 0L) ((System.currentTimeMillis() - ts) / (1000L * 60 * 60 * 24)).toInt() else null
+        if (ts > 0) ((System.currentTimeMillis() - ts) / (1000L * 60 * 60 * 24)).toInt() else null
     }
     val eligible = daysSince == null || daysSince >= ELIGIBLE_AFTER_DAYS
     val location = donor.city?.takeIf { it.isNotBlank() } ?: "Location N/A"
-    val lastDonationText = when (daysSince) {
-        null -> "No record"
-        else -> "$daysSince days ago"
-    }
+    val lastDonationText = daysSince?.let { "$it days ago" } ?: "No record"
     val phone = donor.phone.orEmpty()
     val canCall = phone.isNotBlank()
 
-    OutlinedCard(
-        shape = RoundedCornerShape(20.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp),
-        colors = CardDefaults.outlinedCardColors(containerColor = surface)
-    ) {
-        Column(Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Left: Name + Eligibility (horizontal)
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            donor.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        EligibilityPill(eligible = eligible)
-                    }
+    OutlinedCard(shape = RoundedCornerShape(20.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(donor.name ?: "Unknown", style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(8.dp))
-                    // Location
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.LocationOn, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(location, style = MaterialTheme.typography.bodyMedium)
                     }
                     Spacer(Modifier.height(6.dp))
-                    // Last donation
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Outlined.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Last donation: $lastDonationText", style = MaterialTheme.typography.bodyMedium)
                     }
+                    Spacer(Modifier.height(8.dp))
+                    EligibilityPill(eligible)
                 }
-
-                // Right: Bold blood group
                 Text(
                     donor.bloodGroup.toString(),
                     style = MaterialTheme.typography.headlineSmall,
@@ -213,28 +233,19 @@ private fun DonorCard(
                     modifier = Modifier.padding(start = 12.dp)
                 )
             }
-
             Spacer(Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onViewDetails,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onViewDetails, modifier = Modifier.weight(1f), shape = RoundedCornerShape(14.dp)) {
                     Text("View Details")
                 }
                 Button(
                     onClick = { if (canCall) onCall(phone) },
                     enabled = canCall,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(Icons.Outlined.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text("Call")
                 }
             }
@@ -244,19 +255,11 @@ private fun DonorCard(
 
 @Composable
 private fun EligibilityPill(eligible: Boolean) {
-    val label = if (eligible) "Eligible" else "Not eligible"
-    val bg = if (eligible) MaterialTheme.colorScheme.secondaryContainer
-    else MaterialTheme.colorScheme.errorContainer
-    val fg = if (eligible) MaterialTheme.colorScheme.onSecondaryContainer
-    else MaterialTheme.colorScheme.onErrorContainer
-
-    Surface(
-        color = bg,
-        contentColor = fg,
-        shape = RoundedCornerShape(12.dp)
-    ) {
+    val bg = if (eligible) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer
+    val fg = if (eligible) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer
+    Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(12.dp)) {
         Text(
-            text = label,
+            text = if (eligible) "Eligible" else "Not eligible",
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
         )

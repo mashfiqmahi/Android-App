@@ -37,6 +37,8 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import com.example.androidbloodbank.data.remote.FirebaseRepo
+import com.example.androidbloodbank.data.model.UserProfile
 
 // ---- DB URL for your regioned Realtime Database ----
 private const val DB_URL =
@@ -64,6 +66,74 @@ private fun labelToEnum(label: String) = when (label) {
     "AB+" -> BloodGroup.AB_POS; "AB-" -> BloodGroup.AB_NEG
     "O+" -> BloodGroup.O_POS; else -> BloodGroup.O_NEG
 }
+
+// 🔹 District options (as provided)
+private val districtOptions = listOf(
+    "Dhaka",
+    "Faridpur",
+    "Gazipur",
+    "Gopalganj",
+    "Jamalpur",
+    "Kishoreganj",
+    "Madaripur",
+    "Manikganj",
+    "Munshiganj",
+    "Mymensingh",
+    "Narayanganj",
+    "Narsingdi",
+    "Netrokona",
+    "Rajbari",
+    "Shariatpur",
+    "Sherpur",
+    "Tangail",
+    "Bogra",
+    "Joypurhat",
+    "Naogaon",
+    "Natore",
+    "Nawabganj",
+    "Pabna",
+    "Rajshahi",
+    "Sirajgonj",
+    "Dinajpur",
+    "Gaibandha",
+    "Kurigram",
+    "Lalmonirhat",
+    "Nilphamari",
+    "Panchagarh",
+    "Rangpur",
+    "Thakurgaon",
+    "Barguna",
+    "Barisal",
+    "Bhola",
+    "Jhalokati",
+    "Patuakhali",
+    "Pirojpur",
+    "Bandarban",
+    "Brahmanbaria",
+    "Chandpur",
+    "Chittagong",
+    "Comilla",
+    "Cox's Bazar",
+    "Feni",
+    "Khagrachari",
+    "Lakshmipur",
+    "Noakhali",
+    "Rangamati",
+    "Habiganj",
+    "Maulvibazar",
+    "Sunamganj",
+    "Sylhet",
+    "Bagerhat",
+    "Chuadanga",
+    "Jessore",
+    "Jhenaidah",
+    "Khulna",
+    "Kushtia",
+    "Magura",
+    "Meherpur",
+    "Narail",
+    "Satkhira"
+)
 
 // ---------- Screen ----------
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,6 +169,8 @@ fun ProfileScreen(
     var bloodLabel by remember { mutableStateOf(pick("bloodGroup").ifBlank { "O+" }.let { if (it in bloodLabels) it else "O+" }) }
     var lastDonationMillis by remember { mutableStateOf<Long?>(pickLong("lastDonationMillis")) }
     var photoUri by remember { mutableStateOf(pick("photoUri").ifBlank { null }) }
+    // 🔹 District state (from local JSON if present)
+    var district by remember { mutableStateOf(pick("District")) }
 
     // ---- NEW: Load the canonical data from Firebase on first composition ----
     LaunchedEffect(Unit) {
@@ -117,7 +189,9 @@ fun ProfileScreen(
             val ageC    = snap.child("age").getValue(Int::class.java) ?: 0
             val bgC     = snap.child("bloodGroup").getValue(String::class.java) ?: ""
             val lastC   = snap.child("lastDonationMillis").getValue(Long::class.java)
-            val photoC  = snap.child("photoUrl").getValue(String::class.java) // https://...
+            val photoC  = snap.child("photoUrl").getValue(String::class.java)
+            // 🔹 District from Firebase
+            val distC   = snap.child("District").getValue(String::class.java) ?: ""
 
             // Update UI state with cloud values (canonical)
             if (nameC.isNotBlank()) name = nameC
@@ -128,7 +202,8 @@ fun ProfileScreen(
             if (ageC > 0) age = ageC
             if (bgC.isNotBlank() && bgC in bloodLabels) bloodLabel = bgC
             if (lastC != null && lastC > 0L) lastDonationMillis = lastC
-            if (!photoC.isNullOrBlank()) photoUri = photoC  // ok for AsyncImage
+            if (!photoC.isNullOrBlank()) photoUri = photoC
+            if (distC.isNotBlank()) district = distC
 
             // Also refresh your local JSON snapshot so future picks() are correct
             val localJson = buildString {
@@ -141,7 +216,9 @@ fun ProfileScreen(
                 append("\"age\":${age.coerceAtLeast(0)},")
                 append("\"bloodGroup\":\"$bloodLabel\",")
                 append("\"lastDonationMillis\":${lastDonationMillis ?: 0L},")
-                append("\"photoUri\":\"${photoUri ?: ""}\"")
+                append("\"photoUri\":\"${photoUri ?: ""}\",")
+                // 🔹 save to local snapshot
+                append("\"District\":\"${district.trim()}\"")
                 append("}")
             }
             repo.saveCurrentUserJson(localJson)
@@ -208,6 +285,37 @@ fun ProfileScreen(
                                     photoUri = photoUri
                                 ) { ok, msg -> cloudMsg = msg }
 
+                                // 🔹 Write District (Capital D) into users/{uid}/profile/District
+                                runCatching {
+                                    val uid = FirebaseAuth.getInstance().currentUser?.uid
+                                        ?: error("Not logged in")
+                                    val root = FirebaseDatabase.getInstance(DB_URL).reference
+                                    root.child("users").child(uid).child("profile")
+                                        .child("District").setValue(district.trim()).await()
+
+                                    // (Optional) also mirror to donors_public if you want it visible there:
+                                    // root.child("donors_public").child(uid).child("District").setValue(district.trim()).await()
+                                }
+                                // ✅ Publish public donor card with new schema: location + district
+                                runCatching {
+                                    val repoRemote = FirebaseRepo()
+                                    val profileForPublic = UserProfile(
+                                        name = name.trim(),
+                                        bloodGroup = bloodLabel,           // convert "A+" -> enum
+                                        lastDonationMillis = lastDonationMillis,
+                                        totalDonations = 0,                             // keep 0 or your own value
+                                        contactNumber = phone.trim(),
+                                        location = address.trim()                       // goes to donors_public.location
+                                    )
+                                    // This writes to /donors_public/{uid}:
+                                    //   name, bloodGroup, phone, location, district, lastDonationMillis, updatedAt
+                                    repoRemote.publishDonorCard(
+                                        p = profileForPublic,
+                                        district = district.takeIf { it.isNotBlank() }  // donors_public.district
+                                    )
+                                }
+
+
                                 // 2) Preserve your extended fields locally (keeps UI consistent)
                                 val json = buildString {
                                     append("{")
@@ -219,7 +327,9 @@ fun ProfileScreen(
                                     append("\"age\":${age.coerceAtLeast(0)},")
                                     append("\"bloodGroup\":\"$bloodLabel\",")
                                     append("\"lastDonationMillis\":${lastDonationMillis ?: 0L},")
-                                    append("\"photoUri\":\"${photoUri ?: ""}\"")
+                                    append("\"photoUri\":\"${photoUri ?: ""}\",")
+                                    // 🔹 keep in local snapshot
+                                    append("\"District\":\"${district.trim()}\"")
                                     append("}")
                                 }
                                 repo.saveCurrentUserJson(json)
@@ -326,6 +436,14 @@ fun ProfileScreen(
                 InfoRow(Icons.Outlined.Home, "Address") {
                     if (editing) OutlinedTextField(value = address, onValueChange = { address = it }, singleLine = false, minLines = 2, modifier = Modifier.fillMaxWidth())
                     else Text(address.ifBlank { "—" })
+                }
+                // 🔹 District row
+                InfoRow(Icons.Outlined.Place, "District") {
+                    if (editing) ExposedDropdown(
+                        current = if (district.isBlank()) "Select district" else district,
+                        options = districtOptions
+                    ) { district = it }
+                    else Text(district.ifBlank { "—" })
                 }
                 InfoRow(Icons.Outlined.Bloodtype, "Blood group") {
                     if (editing) ExposedDropdown(current = bloodLabel, options = bloodLabels) { bloodLabel = it }

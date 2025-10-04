@@ -1,5 +1,4 @@
 package com.example.androidbloodbank.data.remote
-
 import com.example.androidbloodbank.data.model.BloodGroup
 import com.example.androidbloodbank.data.model.BloodRequest
 import com.example.androidbloodbank.data.model.Donor
@@ -10,17 +9,16 @@ import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.tasks.await
 import com.google.firebase.auth.AuthResult
-
+import kotlinx.coroutines.tasks.await
 /**
  * Failover-aware Firebase repo.
  * 1) Tries the explicit Singapore RTDB first (DB_URL).
  * 2) If that fails (rules/region mismatch), falls back to the project's default RTDB.
  *
- * This prevents the “data saved to US DB” vs “console open on Singapore DB” mismatch.
+ * This prevents the "data saved to US DB" vs "console open on Singapore DB" mismatch.
  */
 private const val DB_URL =
     "https://blood-bank-e6626-default-rtdb.asia-southeast1.firebasedatabase.app"
-
 class FirebaseRepo(
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
 ) {
@@ -30,15 +28,11 @@ class FirebaseRepo(
             auth.signInAnonymously().await()
         }
     }
-
-
-
     // Try explicit regional DB first, then default DB from google-services.json
     private fun dbRefs(): List<DatabaseReference> = listOf(
         FirebaseDatabase.getInstance(DB_URL).reference,
         FirebaseDatabase.getInstance().reference
     )
-
     // ---------- PROFILE ----------
     suspend fun saveProfile(p: UserProfile) {
         val uid = auth.currentUser?.uid ?: error("Not logged in")
@@ -59,17 +53,22 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
-    suspend fun publishDonorCard(p: UserProfile) {
+    suspend fun publishDonorCard(
+        p: UserProfile,
+        district: String? = null // pass the selected district from your dropdown
+    ) {
         val uid = auth.currentUser?.uid ?: error("Not logged in")
+
         val data = mapOf(
             "name" to p.name,
             "bloodGroup" to p.bloodGroup,
             "phone" to p.contactNumber,
-            "city" to p.location,
+            "location" to p.location,            // ✅ renamed from "city"
+            "district" to district,              // ✅ NEW
             "lastDonationMillis" to (p.lastDonationMillis ?: 0L),
             "updatedAt" to System.currentTimeMillis()
         )
+
         var last: Exception? = null
         for (root in dbRefs()) {
             try {
@@ -80,8 +79,9 @@ class FirebaseRepo(
         throw last ?: IllegalStateException("Unknown DB error")
     }
 
+
     // ---------- DONORS ----------
-    suspend fun listDonorsByGroup(groupLabel: String): List<Donor> {
+    suspend fun listDonorsByGroup(groupLabel: String, district: String? = null): List<Donor> {
         var last: Exception? = null
         for (root in dbRefs()) {
             try {
@@ -89,14 +89,28 @@ class FirebaseRepo(
                 val out = mutableListOf<Donor>()
                 for (child in snap.children) {
                     val bgStr = child.child("bloodGroup").getValue(String::class.java) ?: ""
+
+                    // Read fields
+                    val locationStr = child.child("location").getValue(String::class.java)
+                        ?: child.child("city").getValue(String::class.java) // backward compat read
+                    val districtStr = child.child("district").getValue(String::class.java)
+
                     if (bgStr == groupLabel) {
+                        // ✅ STRICT district filter (no fallback to location)
+                        if (district != null) {
+                            if (districtStr == null || !districtStr.equals(district, ignoreCase = true)) {
+                                continue
+                            }
+                        }
+
                         out.add(
                             Donor(
                                 id = child.key.orEmpty(),
                                 name = child.child("name").getValue(String::class.java) ?: "Unknown",
                                 bloodGroup = parseBg(bgStr),
                                 phone = child.child("phone").getValue(String::class.java),
-                                city = child.child("city").getValue(String::class.java),
+                                // Donor.city used by UI -> feed from NEW 'location' (or old 'city' if missing)
+                                city = locationStr,
                                 lastDonationMillis = child.child("lastDonationMillis").getValue(Long::class.java)
                             )
                         )
@@ -108,12 +122,12 @@ class FirebaseRepo(
         throw last ?: IllegalStateException("Unknown DB error")
     }
 
+
     // List ALL users (reads users/{uid}/profile) and maps to Donor UI model
     // List ALL users as Donor models from users/*/profile.
 // Tries users first; if empty, falls back to donors_public.
     suspend fun listAllUsers(): List<Donor> {
         ensureAuth() // <-- important for rules requiring auth
-
         // Try users/*/profile
         run {
             var last: Exception? = null
@@ -124,22 +138,16 @@ class FirebaseRepo(
                     for (userNode in snap.children) {
                         val prof = userNode.child("profile")
                         if (!prof.exists()) continue
-
                         val name  = prof.child("name").getValue(String::class.java) ?: "User"
                         val bgStr = prof.child("bloodGroup").getValue(String::class.java) ?: ""
-
                         val phone = prof.child("phone").getValue(String::class.java)
                             ?: prof.child("contactNumber").getValue(String::class.java)
-
                         val city  = prof.child("city").getValue(String::class.java)
                             ?: prof.child("location").getValue(String::class.java)
-
                         val hospital = prof.child("hospital").getValue(String::class.java)
                             ?: prof.child("hospitalName").getValue(String::class.java)
-
                         val lastDonation = prof.child("lastDonationMillis").getValue(Long::class.java)
                         val verified = prof.child("verified").getValue(Boolean::class.java) ?: false
-
                         out.add(
                             Donor(
                                 id = userNode.key.orEmpty(),
@@ -159,12 +167,9 @@ class FirebaseRepo(
             }
             // ignore last; attempt donors_public next
         }
-
         // Fallback: donors_public/*
         return listAllDonorsPublic()
     }
-
-
     // Public donors: donors_public/*  (no group filter)
     suspend fun listAllDonorsPublic(): List<Donor> {
         var last: Exception? = null
@@ -174,13 +179,16 @@ class FirebaseRepo(
                 val out = mutableListOf<Donor>()
                 for (child in snap.children) {
                     val bgStr = child.child("bloodGroup").getValue(String::class.java) ?: ""
+                    val locationStr = child.child("location").getValue(String::class.java)
+                        ?: child.child("city").getValue(String::class.java) // backward compat
+
                     out.add(
                         Donor(
                             id = child.key.orEmpty(),
                             name = child.child("name").getValue(String::class.java) ?: "Unknown",
                             bloodGroup = parseBgFlexible(bgStr),
                             phone = child.child("phone").getValue(String::class.java),
-                            city = child.child("city").getValue(String::class.java),
+                            city = locationStr,
                             lastDonationMillis = child.child("lastDonationMillis").getValue(Long::class.java)
                         )
                     )
@@ -190,7 +198,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
 
 
     // ---------- REQUESTS: hard-owned under /requests/{uid}/{id} ----------
@@ -208,7 +215,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
     /** List ONLY my requests */
     suspend fun listMyRequests(): List<Pair<String, BloodRequest>> {
         val uid = auth.currentUser?.uid ?: error("Not logged in")
@@ -224,7 +230,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
     /** Overwrite existing (no push) */
     suspend fun updateBloodRequest(id: String, updated: BloodRequest) {
         val uid = auth.currentUser?.uid ?: error("Not logged in")
@@ -238,7 +243,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
     /** Delete existing */
     suspend fun deleteBloodRequest(id: String) {
         val uid = auth.currentUser?.uid ?: error("Not logged in")
@@ -251,7 +255,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
     /** Remove expired (neededOnMillis < now); returns count removed */
     suspend fun cleanupExpiredRequests(): Int {
         val uid = auth.currentUser?.uid ?: return 0
@@ -274,7 +277,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
     suspend fun listActivePublicRequests(nowMs: Long = System.currentTimeMillis())
             : List<Pair<String, BloodRequest>> {
         var last: Exception? = null
@@ -285,7 +287,6 @@ class FirebaseRepo(
                     .startAt(nowMs.toDouble())        // RTDB range uses Double
                     .get()
                     .await()
-
                 return snap.children.mapNotNull { c ->
                     val id = c.key ?: return@mapNotNull null
                     id to DataSnapshotToRequestPublic(c)
@@ -294,7 +295,6 @@ class FirebaseRepo(
         }
         throw last ?: IllegalStateException("Unknown DB error")
     }
-
     // helper to read what you write in PostRequestScreen
     private fun DataSnapshotToRequestPublic(c: com.google.firebase.database.DataSnapshot): BloodRequest {
         val groupStr = c.child("bloodGroup").getValue(String::class.java) ?: "O+"
@@ -307,14 +307,12 @@ class FirebaseRepo(
             neededOnMillis  = c.child("neededOnMillis").getValue(Long::class.java) ?: 0L
         )
     }
-
-    // Automatic delte expired requests of current user when user sign in
+    // Automatic delete expired requests of current user when user sign in
     suspend fun cleanupExpiredRequestsForCurrentUser(): Int {
         val uid = auth.currentUser?.uid ?: return 0
         val now = System.currentTimeMillis()
         var removed = 0
         var last: Exception? = null
-
         for (root in dbRefs()) {
             try {
                 val userRef = root.child("requests").child(uid)
@@ -334,13 +332,10 @@ class FirebaseRepo(
         if (last != null) throw last
         return removed
     }
-
 }
-
 // ---------- helpers ----------
 private fun parseBgFlexible(raw: String): BloodGroup {
     val s = raw.trim().uppercase()
-
     // Common label forms
     when (s) {
         "A+" -> return BloodGroup.A_POS
@@ -352,7 +347,6 @@ private fun parseBgFlexible(raw: String): BloodGroup {
         "O+" -> return BloodGroup.O_POS
         "O-" -> return BloodGroup.O_NEG
     }
-
     // Enum-like forms (what saveProfile might have written)
     return when (s) {
         "A_POS", "A POS", "A_POSITIVE" -> BloodGroup.A_POS
@@ -368,8 +362,6 @@ private fun parseBgFlexible(raw: String): BloodGroup {
 }
 // Back-compat shim for older call sites
 private fun parseBg(label: String): BloodGroup = parseBgFlexible(label)
-
-
 private fun BloodRequest.toMap(ownerUid: String): Map<String, Any?> = mapOf(
     "ownerUid" to ownerUid,   // <-- REQUIRED by rules
     "requesterName" to requesterName,
@@ -380,7 +372,6 @@ private fun BloodRequest.toMap(ownerUid: String): Map<String, Any?> = mapOf(
     "neededOnMillis" to neededOnMillis,
     "createdAt" to System.currentTimeMillis()
 )
-
 private fun DataSnapshot.toRequest(): BloodRequest {
     val groupStr = child("bloodGroup").getValue(String::class.java) ?: "O+"
     return BloodRequest(
