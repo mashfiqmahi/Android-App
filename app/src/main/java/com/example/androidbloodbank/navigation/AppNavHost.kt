@@ -383,9 +383,9 @@ private fun TabsShell(
                 NavHost(bankNav, startDestination = Route.BloodBank.path, modifier = Modifier.padding(padding)) {
                     composable(Route.BloodBank.path) {
                         BloodBankScreen(
-                            onNearby    = { bankNav.navigate(Route.NearbyBloodBank.path) },
-                            onAvailable = { bankNav.navigate(Route.AvailableBlood.path) },
-                            onBack      = { bankNav.popBackStack() }
+//                            onNearby    = { bankNav.navigate(Route.NearbyBloodBank.path) },
+//                            onAvailable = { bankNav.navigate(Route.AvailableBlood.path) },
+                              onBack      = { bankNav.popBackStack() }
                         )
                     }
                     composable(Route.NearbyBloodBank.path)  { NearbyBloodBankScreen(onBack = { bankNav.popBackStack() }) }
