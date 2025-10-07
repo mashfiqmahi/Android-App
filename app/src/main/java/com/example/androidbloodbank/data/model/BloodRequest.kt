@@ -6,6 +6,17 @@ data class BloodRequest(
     val locationName: String,
     val bloodGroup: BloodGroup,
     val phone: String,
-    // NEW: date the blood is needed (epoch millis). Default keeps old saved data loading fine.
-    val neededOnMillis: Long = System.currentTimeMillis()
-)
+    val neededOnMillis: Long
+) {
+    // Convert BloodRequest to a Map for Firebase
+    fun toMap(): Map<String, Any> {
+        return mapOf(
+            "requesterName" to requesterName,
+            "hospitalName" to hospitalName,
+            "locationName" to locationName,
+            "bloodGroup" to bloodGroup.toString(),
+            "phone" to phone,
+            "neededOnMillis" to neededOnMillis
+        )
+    }
+}

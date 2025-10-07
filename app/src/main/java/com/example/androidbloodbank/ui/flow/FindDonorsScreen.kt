@@ -29,16 +29,16 @@ private const val ELIGIBLE_AFTER_DAYS = 90
 
 // Static district list (exact spellings you gave)
 private val BD_DISTRICTS = listOf(
-    "Dhaka","Faridpur","Gazipur","Gopalganj","Jamalpur","Kishoreganj","Madaripur",
-    "Manikganj","Munshiganj","Mymensingh","Narayanganj","Narsingdi","Netrokona",
-    "Rajbari","Shariatpur","Sherpur","Tangail","Bogra","Joypurhat","Naogaon",
-    "Natore","Nawabganj","Pabna","Rajshahi","Sirajgonj","Dinajpur","Gaibandha",
-    "Kurigram","Lalmonirhat","Nilphamari","Panchagarh","Rangpur","Thakurgaon",
-    "Barguna","Barisal","Bhola","Jhalokati","Patuakhali","Pirojpur","Bandarban",
-    "Brahmanbaria","Chandpur","Chittagong","Comilla","Cox's Bazar","Feni",
-    "Khagrachari","Lakshmipur","Noakhali","Rangamati","Habiganj","Maulvibazar",
-    "Sunamganj","Sylhet","Bagerhat","Chuadanga","Jessore","Jhenaidah","Khulna",
-    "Kushtia","Magura","Meherpur","Narail","Satkhira"
+    "Bandarban", "Bagerhat", "Barguna", "Barisal", "Bhola", "Bogra", "Brahmanbaria",
+    "Chandpur", "Chittagong", "Chuadanga", "Comilla", "Cox's Bazar", "Dhaka", "Dinajpur",
+    "Faridpur", "Feni", "Gazipur", "Gaibandha", "Gopalganj", "Habiganj", "Jamalpur",
+    "Jessore", "Jhenaidah", "Jhalokati", "Joypurhat", "Kishoreganj", "Khagrachari",
+    "Khulna", "Kurigram", "Kushtia", "Lakshmipur", "Lalmonirhat", "Magura", "Manikganj",
+    "Meherpur", "Madaripur", "Maulvibazar", "Munshiganj", "Mymensingh", "Narayanganj",
+    "Narsingdi", "Naogaon", "Natore", "Netrokona", "Nilphamari", "Noakhali", "Pabna",
+    "Panchagarh", "Patuakhali", "Pirojpur", "Rajbari", "Rajshahi", "Rangamati", "Rangpur",
+    "Shariatpur", "Sherpur", "Sirajgonj", "Sunamganj", "Sylhet", "Tangail", "Thakurgaon"
+
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)

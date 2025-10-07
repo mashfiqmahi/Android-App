@@ -37,6 +37,7 @@ sealed class Route(val path: String) {
     // Request blood flow
     data object RequestBlood : Route("request_blood")
     data object TrackRequest : Route("track_request")
+    data object EditRequest : Route("edit_request")
 
     // Profile & info
     data object Profile   : Route("profile")

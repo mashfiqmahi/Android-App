@@ -332,6 +332,23 @@ class FirebaseRepo(
         if (last != null) throw last
         return removed
     }
+
+    suspend fun markRequestFulfilled(id: String) {
+        val uid = auth.currentUser?.uid ?: error("Not logged in")
+        var last: Exception? = null
+        for (root in dbRefs()) {
+            try {
+                // mark private as fulfilled
+                root.child("requests").child(uid).child(id)
+                    .child("fulfilledAt").setValue(System.currentTimeMillis()).await()
+                // remove from public feed
+                root.child("requests_public").child(id).removeValue().await()
+                return
+            } catch (e: Exception) { last = e }
+        }
+        throw last ?: IllegalStateException("Unknown DB error")
+    }
+
 }
 // ---------- helpers ----------
 private fun parseBgFlexible(raw: String): BloodGroup {

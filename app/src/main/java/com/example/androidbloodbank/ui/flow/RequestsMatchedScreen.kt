@@ -32,6 +32,7 @@ private fun labelToCode(l: String) = when (l) {
     "AB+" -> "AB_POS"; "AB-" -> "AB_NEG"
     "O+" -> "O_POS"; else -> "O_NEG"
 }
+
 private fun codeToLabel(c: String) = when (c) {
     "A_POS" -> "A+"; "A_NEG" -> "A-"
     "B_POS" -> "B+"; "B_NEG" -> "B-"
@@ -49,7 +50,6 @@ fun RequestsMatchedScreen(
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-
     val uid = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
     val db = FirebaseDatabase.getInstance(SG_DB_URL).reference
 
@@ -80,18 +80,14 @@ fun RequestsMatchedScreen(
 
     suspend fun loadMatchesFor(label: String) {
         val code = labelToCode(label)
-
         // Query both representations and merge by key
         val qLabel = db.child("requests_public").orderByChild("bloodGroup").equalTo(label)
         val qCode  = db.child("requests_public").orderByChild("bloodGroup").equalTo(code)
-
         val s1 = qLabel.get().await()
         val s2 = qCode.get().await()
-
         val map = linkedMapOf<String, DataSnapshot>()
         s1.children.forEach { map[it.key!!] = it }
         s2.children.forEach { map[it.key!!] = it }
-
         items = map.values
             .map(::parse)
             .filter { it.ownerUid != uid }              // exclude my own posts
@@ -108,7 +104,7 @@ fun RequestsMatchedScreen(
                     items = emptyList()
                     snackbar.showSnackbar("Set your blood group in Profile to see matching requests.")
                 } else {
-                    loadMatchesFor(g!!)
+                    loadMatchesFor(g)
                 }
             } catch (e: Exception) {
                 items = emptyList()
@@ -134,7 +130,7 @@ fun RequestsMatchedScreen(
             when {
                 loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 userGroup.isNullOrBlank() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Your blood group isn’t set.")
+                    Text("Your blood group isn't set.")
                 }
                 items.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("No matching requests from other users.")
@@ -147,10 +143,18 @@ fun RequestsMatchedScreen(
                     items(items, key = { it.id }) { item ->
                         RequestCard(
                             item = item,
-                            showCall = true,
+                            currentUid = uid,
+                            isFulfilling = false, // This card is never the owner's, so it's never fulfilling.
                             onCall = {
                                 val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(item.phone)}"))
                                 context.startActivity(intent)
+                            },
+                            onFulfill = {
+                                // This action won't be triggered as the button is not visible to non-owners,
+                                // but it's good practice to handle it.
+                                scope.launch {
+                                    snackbar.showSnackbar("Only the request owner can mark as fulfilled")
+                                }
                             }
                         )
                     }

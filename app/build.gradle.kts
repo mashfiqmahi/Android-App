@@ -67,6 +67,8 @@ dependencies {
 
     // Gson
     implementation("com.google.code.gson:gson:2.10.1")
+    implementation(libs.ads.mobile.sdk)
+    implementation(libs.foundation)
 
     // Tests / debug
     testImplementation("junit:junit:4.13.2")

@@ -35,6 +35,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.androidbloodbank.data.remote.FirebaseRepo
 import com.example.androidbloodbank.ui.screens.ForgotPasswordScreen
 import androidx.navigation.NavType
+import com.example.androidbloodbank.ui.screens.EditRequestScreen
 
 
 private const val TabsRoute = "tabs_shell"
@@ -165,6 +166,8 @@ fun AppNavHost(
                     }
                 })
             }
+
+
 
             // Optional legacy/debug outside tabs
             composable("schedules") { SchedulesScreen(repo = repo, onBack = { navController.popBackStack() }) }
@@ -331,15 +334,20 @@ private fun TabsShell(
             Tab.REQUESTS -> stateHolder.SaveableStateProvider("tab_requests") {
                 NavHost(requestsNav, startDestination = Route.RequestBlood.path, modifier = Modifier.padding(padding)) {
                     composable(Route.RequestBlood.path) {
+
+
+
                         // 🔹 Auto-cleanup this user's expired requests (private + public mirror)
                         LaunchedEffect(Unit) {
                             runCatching { FirebaseRepo().cleanupExpiredRequestsForCurrentUser() }
                         }
-
+                        val firebaseRepo = remember { FirebaseRepo() }
                         RequestsFeedScreen(
                             repo = repo,
+                            firebaseRepo = firebaseRepo,
                             onBack = { /* root */ },
-                            onRequestNew = { requestsNav.navigate(Route.PostRequest.path) }
+                            onRequestNew = { requestsNav.navigate(Route.PostRequest.path) },
+                            navController = requestsNav
                         )
                     }
                     composable(Route.PostRequest.path) {
@@ -350,8 +358,24 @@ private fun TabsShell(
                         )
                     }
                     composable(Route.TrackRequest.path) { TrackRequestScreen(repo = repo, onBack = { requestsNav.popBackStack() }) }
+
+                    composable(
+                        route = "${Route.EditRequest.path}/{requestId}",
+                        arguments = listOf(navArgument("requestId") { type = NavType.StringType })
+                    ) { backStackEntry ->
+                        val requestId = backStackEntry.arguments?.getString("requestId").orEmpty()
+                        EditRequestScreen(
+                            requestId = requestId,
+                            repo = repo,
+                            onBack = { requestsNav.popBackStack() }
+                        )
+                    }
+
                 }
+
             }
+
+
 
 
             /* ---------- BANK TAB ---------- */

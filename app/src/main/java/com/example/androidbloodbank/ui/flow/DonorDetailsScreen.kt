@@ -17,7 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext   // <-- add this
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.androidbloodbank.data.LocalRepo
@@ -55,7 +55,7 @@ data class DonorDetails(
     val email: String = "",
     val location: String = "",
     val lastDonationMillis: Long = 0L,
-    val eligible: Boolean = true,
+    val eligible: Boolean = true, // Default to true if no data
     val gender: String = "",
     val age: Int = 0,
     val address: String = ""
@@ -88,21 +88,36 @@ fun DonorDetailsScreen(
 
         // If there is no public donor record at all, return minimal info
         if (!pub.exists()) {
-            return DonorDetails(uid = uid)
+            // Default eligibility to false if no donor record exists
+            return DonorDetails(uid = uid, eligible = false)
         }
 
         val bgRaw = pub.child("bloodGroup").getValue(String::class.java) ?: ""
         val bg = if (bgRaw.contains("+") || bgRaw.contains("-")) bgRaw else codeToLabel(bgRaw)
 
         val last = pub.child("lastDonationMillis").getValue(Long::class.java) ?: 0L
-        val elig = pub.child("eligible").getValue(Boolean::class.java)
-            ?: (daysSince(last)?.let { it >= 120 } ?: true)
+
+        // ✅ FIX for Inconsistency: Prioritize the explicit 'eligible' field from DB (if present),
+        // as the Donor List Screen seems to be using it.
+        val elig = pub.child("eligible").getValue(Boolean::class.java) ?: run {
+            // Fallback to calculation if 'eligible' field is missing:
+            if (last == 0L) {
+                true // Never donated is eligible
+            } else {
+                // Calculate if days since last donation is >= 120 (standard recovery time)
+                val days = (System.currentTimeMillis() - last) / (1000L * 60 * 60 * 24)
+                days >= 120
+            }
+        }
+
 
         // Prefer public fields
         var email: String = pub.child("email").getValue(String::class.java) ?: ""
         val name = pub.child("name").getValue(String::class.java) ?: ""
         val phone = pub.child("phone").getValue(String::class.java) ?: ""
-        val city = pub.child("city").getValue(String::class.java) ?: ""
+        // FIX: Read from 'location' field
+        val publicLocation = pub.child("location").getValue(String::class.java) ?: ""
+
 
         // Private profile only for the owner (per rules)
         var gender: String = ""
@@ -110,16 +125,18 @@ fun DonorDetailsScreen(
         var address: String = ""
 
         if (auth.currentUser?.uid == uid) {
+            // FIX: Prioritize Auth email for owner view
+            email = auth.currentUser?.email ?: ""
+
             runCatching {
                 val prof = db.child("users").child(uid).child("profile").get().await()
-                if (email.isBlank()) {
-                    // fallback to private email if public one missing
-                    email = prof.child("email").getValue(String::class.java) ?: (auth.currentUser?.email ?: "")
-                }
+
+                // Read private details
                 gender = prof.child("gender").getValue(String::class.java) ?: ""
                 age = prof.child("age").getValue(Int::class.java)
                     ?: (prof.child("age").getValue(Long::class.java)?.toInt() ?: 0)
-                address = prof.child("address").getValue(String::class.java) ?: ""
+                // Use the private 'location' field (which stores address) for the detailed InfoRow
+                address = prof.child("location").getValue(String::class.java) ?: ""
             }
         }
 
@@ -129,9 +146,9 @@ fun DonorDetailsScreen(
             bloodGroup = bg,
             phone = phone,
             email = email,
-            location = city,
+            location = publicLocation,
             lastDonationMillis = last,
-            eligible = elig,
+            eligible = elig, // Use the resolved value
             gender = gender,
             age = age,
             address = address
@@ -227,18 +244,18 @@ fun DonorDetailsScreen(
                         }
                     }
 
-                    val ok = d.eligible
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(if (ok) "Eligible to donate" else "Not eligible now") },
-                        leadingIcon = {
-                            Icon(if (ok) Icons.Outlined.CheckCircle else Icons.Outlined.Block, null)
-                        },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (ok) Color(0x3328A745) else Color(0x33DC3545),
-                            labelColor = Color.White
-                        )
-                    )
+//                    val ok = d.eligible
+//                    AssistChip(
+//                        onClick = {},
+//                        label = { Text(if (ok) "Eligible to donate" else "Not eligible now") },
+//                        leadingIcon = {
+//                            Icon(if (ok) Icons.Outlined.CheckCircle else Icons.Outlined.Block, null)
+//                        },
+//                        colors = AssistChipDefaults.assistChipColors(
+//                            containerColor = if (ok) Color(0x3328A745) else Color(0x33DC3545),
+//                            labelColor = Color.White
+//                        )
+//                    )
                 }
             }
 
